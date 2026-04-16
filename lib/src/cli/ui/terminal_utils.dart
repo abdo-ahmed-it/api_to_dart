@@ -1,5 +1,9 @@
 import 'dart:io';
 
+import 'package:dart_console/dart_console.dart';
+
+final _console = Console();
+
 class TerminalUtils {
   static const String esc = '\x1B';
 
@@ -25,84 +29,51 @@ class TerminalUtils {
   static String cyan(String text) => '\x1B[36m$text\x1B[0m';
 
   /// Creates a clickable file link using OSC 8 hyperlink sequence.
-  /// Works in VS Code terminal, iTerm2, macOS Terminal, etc.
   static String fileLink(String filePath, {String? label}) {
     final displayText = label ?? filePath;
     return '\x1B]8;;file://$filePath\x1B\\$displayText\x1B]8;;\x1B\\';
   }
 
   /// Read a single keypress from stdin.
-  /// Returns the key as a string representation.
+  /// Uses dart_console for cross-platform support (fixes Windows arrow keys).
   static String readKey() {
-    stdin.echoMode = false;
-    stdin.lineMode = false;
+    final key = _console.readKey();
 
-    try {
-      final byte = stdin.readByteSync();
-
-      // Unix escape sequences: ESC [ code
-      if (byte == 27) {
-        final next = stdin.readByteSync();
-        if (next == 91) {
-          final code = stdin.readByteSync();
-          switch (code) {
-            case 65:
-              return 'up';
-            case 66:
-              return 'down';
-            case 67:
-              return 'right';
-            case 68:
-              return 'left';
-            default:
-              return 'unknown';
-          }
-        }
-        return 'escape';
-      }
-
-      // Windows arrow keys: 0xE0 (224) then code
-      // Also 0x00 for some function keys
-      if (byte == 224 || byte == 0) {
-        final code = stdin.readByteSync();
-        switch (code) {
-          case 72:
-            return 'up';
-          case 80:
-            return 'down';
-          case 77:
-            return 'right';
-          case 75:
-            return 'left';
-          default:
-            return 'unknown';
-        }
-      }
-
-      switch (byte) {
-        case 10: // Enter (Unix)
-        case 13: // Enter (Windows)
+    if (key.isControl) {
+      switch (key.controlChar) {
+        case ControlCharacter.arrowUp:
+          return 'up';
+        case ControlCharacter.arrowDown:
+          return 'down';
+        case ControlCharacter.arrowRight:
+          return 'right';
+        case ControlCharacter.arrowLeft:
+          return 'left';
+        case ControlCharacter.enter:
           return 'enter';
-        case 32: // Space
-          return 'space';
-        case 113: // q
+        case ControlCharacter.escape:
+          return 'escape';
+        case ControlCharacter.ctrlC:
           return 'q';
-        case 81: // Q
-          return 'q';
-        case 97: // a
-          return 'a';
-        case 65: // A
-          return 'a';
-        case 110: // n
-          return 'n';
-        case 78: // N
-          return 'n';
         default:
-          return String.fromCharCode(byte);
+          return 'unknown';
       }
-    } finally {
-      stdin.echoMode = true;
-      stdin.lineMode = true;
+    }
+
+    switch (key.char) {
+      case ' ':
+        return 'space';
+      case 'q':
+      case 'Q':
+        return 'q';
+      case 'a':
+      case 'A':
+        return 'a';
+      case 'n':
+      case 'N':
+        return 'n';
+      default:
+        return key.char;
     }
   }
 }
