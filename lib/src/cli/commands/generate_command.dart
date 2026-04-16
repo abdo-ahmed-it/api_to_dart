@@ -164,9 +164,9 @@ class GenerateCommand extends Command {
       logger.i(
           'Processing ${endpoint.method.name} ${endpoint.path}...');
 
-      ResponseDefinition response;
+      ResolveResult result;
       try {
-        response = await resolver.resolve(
+        result = await resolver.resolve(
           endpoint,
           baseUrl: resolvedBaseUrl,
           token: token,
@@ -174,9 +174,13 @@ class GenerateCommand extends Command {
       } catch (e) {
         logger.w(
             'Failed to resolve response for ${endpoint.name}: $e');
-        response = ResponseDefinition.empty;
+        result = ResolveResult(response: ResponseDefinition.empty);
       }
-      endpointResponses[endpoint] = response;
+      endpointResponses[endpoint] = result.response;
+
+      if (result.log != null) {
+        result.log!.writeToFile(outputDir, endpoint.fileName.replaceAll('.dart', ''));
+      }
     }
 
     final generated = emitter.emitBatch(

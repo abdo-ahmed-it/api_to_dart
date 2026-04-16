@@ -3,8 +3,16 @@ import 'dart:convert';
 import '../logger/logger.dart';
 import '../models/api_endpoint.dart';
 import '../models/auth_definition.dart';
+import '../models/request_log.dart';
 import '../models/response_definition.dart';
 import 'http_client.dart';
+
+class ResolveResult {
+  final ResponseDefinition response;
+  final RequestLog? log;
+
+  ResolveResult({required this.response, this.log});
+}
 
 class ResponseResolver {
   final ApiHttpClient _httpClient;
@@ -22,35 +30,37 @@ class ResponseResolver {
   /// 3. Schema → generate synthetic JSON
   /// 4. Example with empty arrays → use anyway (better than nothing)
   /// 5. None → return empty (generator will use dynamic)
-  Future<ResponseDefinition> resolve(
+  Future<ResolveResult> resolve(
     ApiEndpoint endpoint, {
     required String baseUrl,
     String? token,
   }) async {
     final response = endpoint.response;
 
-    // 1. If we have an example with good data (no empty arrays), use it
-    if (response != null && response.hasJson) {
-      if (!_hasEmptyArrays(response.jsonBody!)) {
-        _logger.i('${endpoint.name}: Using example response');
-        return response;
-      }
-      // Has empty arrays — try live fetch first
-      _logger.i(
-          '${endpoint.name}: Example has empty arrays — trying live fetch');
-    }
-
-    // 2. Try live fetch if we have a base URL
+    // 1. Always try live fetch first if we have a base URL
     if (baseUrl.isNotEmpty) {
-      final fetched = await _tryLiveFetch(endpoint, baseUrl, token);
-      if (fetched != null) {
-        return fetched;
+      final fetchResult = await _tryLiveFetch(endpoint, baseUrl, token);
+      if (fetchResult != null && fetchResult.response.hasJson) {
+        return fetchResult;
+      }
+      if (fetchResult != null && fetchResult.log != null) {
+        final fallback = _tryFallbacks(endpoint, response);
+        return ResolveResult(response: fallback, log: fetchResult.log);
       }
     }
 
-    // 3. Try schema
+    // 2. Fallbacks: example → schema → empty
+    final fallback = _tryFallbacks(endpoint, response);
+    return ResolveResult(response: fallback);
+  }
+
+  ResponseDefinition _tryFallbacks(
+      ApiEndpoint endpoint, ResponseDefinition? response) {
+    if (response != null && response.hasJson) {
+      return response;
+    }
+
     if (response != null && response.hasSchema) {
-      _logger.i('${endpoint.name}: Generating from schema');
       final syntheticJson = _schemaToJson(response.schema!);
       if (syntheticJson != null) {
         return ResponseDefinition(
@@ -61,24 +71,14 @@ class ResponseResolver {
       }
     }
 
-    // 4. If we had an example (even with empty arrays), use it anyway
-    if (response != null && response.hasJson) {
-      _logger.i('${endpoint.name}: Using example response (with empty arrays)');
-      return response;
-    }
-
-    // 5. Nothing available
-    _logger.w(
-        '${endpoint.name}: No response available — generating action-only');
     return ResponseDefinition.empty;
   }
 
-  Future<ResponseDefinition?> _tryLiveFetch(
+  Future<ResolveResult?> _tryLiveFetch(
     ApiEndpoint endpoint,
     String baseUrl,
     String? token,
   ) async {
-    _logger.i('${endpoint.name}: Fetching live response from server');
 
     final url = '$baseUrl${endpoint.path}';
 
@@ -102,24 +102,40 @@ class ResponseResolver {
         auth: authDef,
       );
 
-      if (result != null && result.isSuccess && result.body.isNotEmpty) {
-        // Verify it's valid JSON
+      if (result == null) return null;
+
+      // Build log for every request (success or failure)
+      final log = RequestLog(
+        requestName: endpoint.name,
+        requestMethod: result.requestMethod,
+        url: result.requestUrl,
+        statusCode: result.statusCode,
+        headers: result.requestHeaders,
+        queryParameters: result.requestQueryParams,
+        requestBody: result.requestBody,
+        responseBody: result.body,
+        sentTime: result.sentTime,
+        receivedTime: result.receivedTime,
+      );
+
+      if (result.isSuccess && result.body.isNotEmpty) {
         try {
           jsonDecode(result.body);
-          _logger.i('${endpoint.name}: ✓ Got live response');
-          return ResponseDefinition(
-            source: ResponseSource.fetched,
-            jsonBody: result.body,
+          return ResolveResult(
+            response: ResponseDefinition(
+              source: ResponseSource.fetched,
+              jsonBody: result.body,
+            ),
+            log: log,
           );
         } catch (_) {
-          _logger.w('${endpoint.name}: Live response is not valid JSON');
+          return ResolveResult(response: ResponseDefinition.empty, log: log);
         }
-      } else if (result != null) {
-        _logger.w(
-            '${endpoint.name}: Server returned ${result.statusCode}');
+      } else {
+        // Return null response but still have the log
+        return ResolveResult(response: ResponseDefinition.empty, log: log);
       }
     } catch (e) {
-      _logger.w('${endpoint.name}: Live fetch failed: $e');
     }
 
     return null;
@@ -149,7 +165,6 @@ class ResponseResolver {
         return jsonEncode(example);
       }
     } catch (e) {
-      _logger.w('Failed to generate synthetic JSON from schema: $e');
     }
     return null;
   }

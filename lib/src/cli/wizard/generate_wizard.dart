@@ -92,25 +92,35 @@ class GenerateWizard {
 
     stdout.writeln('');
 
-    // Step 2: Select endpoints
-    final selector = EndpointSelector(tree);
-    final selected = selector.selectInteractively();
+    // Step 2 & 3: Select and generate loop
+    while (true) {
+      stdout.writeln('');
+      final selector = EndpointSelector(tree);
+      final selected = selector.selectInteractively();
 
-    if (selected == null || selected.isEmpty) {
-      _logger.w('No endpoints selected.');
-      return;
+      if (selected == null || selected.isEmpty) {
+        _logger.i('Done.');
+        return;
+      }
+
+      stdout.writeln('');
+      _logger.i('Selected ${selected.length} endpoints — generating...');
+      stdout.writeln('');
+
+      await _step3Generate(
+        endpoints: selected,
+        baseUrl: baseUrl ?? '',
+        token: token,
+        urlVariables: loadResult.urlVariables,
+      );
+
+      stdout.writeln('');
+      final again = promptConfirm(
+        message: 'Select more endpoints?',
+        defaultValue: false,
+      );
+      if (!again) break;
     }
-
-    stdout.writeln('');
-    _logger.i('Selected ${selected.length} endpoints — generating...');
-    stdout.writeln('');
-
-    // Step 3: Generate with deduplication
-    await _step3Generate(
-      endpoints: selected,
-      baseUrl: baseUrl ?? '',
-      token: token,
-    );
   }
 
   void _printBanner() {
@@ -475,12 +485,22 @@ class GenerateWizard {
     }
 
     // Resolve {{variables}} in the exported spec using environment variables
+    // Skip URL-type variables (they get embedded in paths and break them)
     var resolvedJson = openApiJson;
+    int resolvedCount = 0;
     if (envVariables != null && envVariables.isNotEmpty) {
       envVariables.forEach((key, value) {
+        if (value.startsWith('http://') || value.startsWith('https://')) {
+          // URL variable — don't replace in spec, it would corrupt paths
+          return;
+        }
+        if (value.isEmpty) return;
         resolvedJson = resolvedJson.replaceAll('{{$key}}', value);
+        resolvedCount++;
       });
-      _logger.i('✓ Resolved ${envVariables.length} environment variables');
+      if (resolvedCount > 0) {
+        _logger.i('✓ Resolved $resolvedCount environment variables');
+      }
     }
 
     final tempFile = File('.apigen_temp_openapi.json');
@@ -512,10 +532,21 @@ class GenerateWizard {
 
       _logger.i('✓ ${tree.sourceName}: ${tree.totalEndpoints} endpoints');
 
+      // Collect URL-type variables for path resolution
+      final urlVars = <String, String>{};
+      if (envVariables != null) {
+        envVariables.forEach((key, value) {
+          if (value.startsWith('http://') || value.startsWith('https://')) {
+            urlVars[key] = value;
+          }
+        });
+      }
+
       return _LoadResult(
         tree: tree,
         baseUrl: baseUrl,
         token: envVariables?['token'] ?? envVariables?['mobile_token'],
+        urlVariables: urlVars,
       );
     } catch (e) {
       _logger.e('Failed to parse exported spec', error: e);
@@ -527,10 +558,68 @@ class GenerateWizard {
 
   // ── Step 3: Generate ───────────────────────────────────────────────
 
+  /// Builds a PascalCase name from a clean path.
+  String _nameFromCleanPath(String path, String method) {
+    final segments = path
+        .split('/')
+        .where((s) =>
+            s.isNotEmpty &&
+            !RegExp(r'^\d+$').hasMatch(s) &&
+            !RegExp(r'^\{.*\}$').hasMatch(s))
+        .toList();
+
+    if (segments.isEmpty) return method;
+
+    final nameParts =
+        segments.length <= 3 ? segments : segments.sublist(segments.length - 3);
+
+    final pathName = nameParts
+        .join('-')
+        .replaceAll(RegExp(r'[^a-zA-Z0-9]'), ' ')
+        .split(RegExp(r'\s+'))
+        .where((s) => s.isNotEmpty)
+        .map((s) => s[0].toUpperCase() + s.substring(1))
+        .join();
+
+    return pathName;
+  }
+
+  /// Resolves the actual base URL for an endpoint.
+  /// Some endpoints use URL variables as path prefixes
+  /// (e.g. path "/system_user_url/login" where system_user_url is a variable
+  /// pointing to "https://host/api/v1/system-user").
+  String _resolveBaseUrl(
+      ApiEndpoint endpoint, String defaultBaseUrl, Map<String, String> urlVars) {
+    if (urlVars.isEmpty) return defaultBaseUrl;
+
+    final path = endpoint.path;
+    // Check if the first path segment matches a URL variable name
+    final segments = path.split('/').where((s) => s.isNotEmpty).toList();
+    if (segments.isNotEmpty && urlVars.containsKey(segments[0])) {
+      return urlVars[segments[0]]!;
+    }
+
+    return defaultBaseUrl;
+  }
+
+  /// Gets the clean path for an endpoint, removing URL variable prefixes.
+  String _resolveEndpointPath(ApiEndpoint endpoint, Map<String, String> urlVars) {
+    if (urlVars.isEmpty) return endpoint.path;
+
+    final segments = endpoint.path.split('/').where((s) => s.isNotEmpty).toList();
+    if (segments.isNotEmpty && urlVars.containsKey(segments[0])) {
+      // Remove the URL variable prefix from the path
+      return '/${segments.sublist(1).join('/')}';
+    }
+
+    return endpoint.path;
+  }
+
   Future<void> _step3Generate({
     required List<ApiEndpoint> endpoints,
     required String baseUrl,
     String? token,
+    Map<String, String> urlVariables = const {},
   }) async {
     const outputDir = 'lib/actions';
     final httpClient = ApiHttpClient(logger: _logger);
@@ -540,18 +629,46 @@ class GenerateWizard {
     final endpointResponses = <ApiEndpoint, ResponseDefinition?>{};
 
     for (final endpoint in endpoints) {
-      ResponseDefinition response;
+      // Resolve the correct base URL and clean path for this endpoint
+      final resolvedBaseUrl = _resolveBaseUrl(endpoint, baseUrl, urlVariables);
+      final cleanPath = _resolveEndpointPath(endpoint, urlVariables);
+
+      // Rebuild name from clean path if the path changed
+      final name = cleanPath != endpoint.path
+          ? _nameFromCleanPath(cleanPath, endpoint.method.name)
+          : endpoint.name;
+
+      // Create endpoint with clean path for code generation
+      final cleanEndpoint = ApiEndpoint(
+        name: name,
+        path: cleanPath,
+        method: endpoint.method,
+        description: endpoint.description,
+        body: endpoint.body,
+        headers: endpoint.headers,
+        queryParams: endpoint.queryParams,
+        auth: endpoint.auth,
+        response: endpoint.response,
+      );
+
+      ResolveResult result;
       try {
-        response = await resolver.resolve(
-          endpoint,
-          baseUrl: baseUrl,
+        result = await resolver.resolve(
+          cleanEndpoint,
+          baseUrl: resolvedBaseUrl,
           token: token,
         );
       } catch (e) {
         _logger.w('Failed to resolve response for ${endpoint.name}: $e');
-        response = ResponseDefinition.empty;
+        result = ResolveResult(response: ResponseDefinition.empty);
       }
-      endpointResponses[endpoint] = response;
+
+      endpointResponses[cleanEndpoint] = result.response;
+
+      // Write request log file
+      if (result.log != null) {
+        result.log!.writeToFile(outputDir, cleanEndpoint.fileName.replaceAll('.dart', ''));
+      }
     }
 
     final generated = emitter.emitBatch(
@@ -570,6 +687,12 @@ class _LoadResult {
   final EndpointTree tree;
   final String? baseUrl;
   final String? token;
+  final Map<String, String> urlVariables;
 
-  _LoadResult({required this.tree, this.baseUrl, this.token});
+  _LoadResult({
+    required this.tree,
+    this.baseUrl,
+    this.token,
+    this.urlVariables = const {},
+  });
 }

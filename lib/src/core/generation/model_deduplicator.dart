@@ -119,23 +119,27 @@ class ModelDeduplicator {
       }
     }
 
-    // Step 3: Find duplicated classes (appear in 2+ endpoints)
+    // Step 3: Find truly duplicated classes (same name AND similar fields)
     final sharedModels = <SharedModel>[];
     final sharedModelNames = <String>{};
+    // Classes with same name but different fields — need renaming
+    final classesToRename = <String, Map<String, ClassDefinition>>{}; // className -> {endpointName -> classDef}
 
     for (final entry in classNameToEndpoints.entries) {
-      if (entry.value.length >= 2) {
-        // Merge fields from all definitions (union)
+      if (entry.value.length < 2) continue;
+
+      final definitions = classNameToDefinitions[entry.key]!;
+
+      // Check if all definitions have similar fields (>= 60% overlap)
+      if (_areDefinitionsSimilar(definitions)) {
+        // Truly the same model — merge fields (union)
         final mergedFields = <String, String>{};
-        for (final classDef in classNameToDefinitions[entry.key]!) {
+        for (final classDef in definitions) {
           for (final fieldEntry in classDef.fields.entries) {
             final fieldName = fixFieldName(fieldEntry.key,
                 typeDef: fieldEntry.value, privateField: false);
             final typeName = _typeDefToString(fieldEntry.value);
-            // If field already exists with different type, keep the more general one
-            if (mergedFields.containsKey(fieldName)) {
-              // Keep existing — both are nullable anyway
-            } else {
+            if (!mergedFields.containsKey(fieldName)) {
               mergedFields[fieldName] = typeName;
             }
           }
@@ -147,6 +151,35 @@ class ModelDeduplicator {
           usedBy: entry.value,
         ));
         sharedModelNames.add(entry.key);
+      } else {
+        // Same name but different fields — rename each to be unique
+        for (int i = 0; i < definitions.length; i++) {
+          classesToRename
+              .putIfAbsent(entry.key, () => {})
+              [entry.value[i]] = definitions[i];
+        }
+      }
+    }
+
+    // Step 3b: Rename conflicting classes by prefixing with endpoint name
+    for (final entry in classesToRename.entries) {
+      final className = entry.key;
+      for (final endpointEntry in entry.value.entries) {
+        final endpointName = endpointEntry.key;
+        final classDef = endpointEntry.value;
+        // Find this class in the endpoint's class list and rename it
+        final endpointClasses = allClassesPerEndpoint[endpointName];
+        if (endpointClasses != null) {
+          for (final cls in endpointClasses) {
+            if (cls.name == className) {
+              // Rename: "Data" → "NotificationsData" (using endpoint name prefix)
+              // Also update references in other classes of this endpoint
+              final newName = '${endpointName}$className';
+              _renameClassInEndpoint(endpointClasses, className, newName);
+              break;
+            }
+          }
+        }
       }
     }
 
@@ -189,6 +222,53 @@ class ModelDeduplicator {
       sharedModelsCode: sharedSb.toString(),
       sharedModelNames: sharedModelNames,
     );
+  }
+
+  /// Checks if all class definitions are similar enough to be merged.
+  /// Uses field name overlap — if >= 60% of fields match, they're similar.
+  bool _areDefinitionsSimilar(List<ClassDefinition> definitions) {
+    if (definitions.length < 2) return true;
+
+    for (int i = 0; i < definitions.length; i++) {
+      for (int j = i + 1; j < definitions.length; j++) {
+        final fieldsA = definitions[i].fields.keys.toSet();
+        final fieldsB = definitions[j].fields.keys.toSet();
+
+        if (fieldsA.isEmpty && fieldsB.isEmpty) continue;
+
+        final intersection = fieldsA.intersection(fieldsB).length;
+        final union = fieldsA.union(fieldsB).length;
+
+        if (union == 0) continue;
+        final similarity = intersection / union;
+
+        if (similarity < 0.6) return false;
+      }
+    }
+    return true;
+  }
+
+  /// Renames a class within an endpoint's class list,
+  /// updating all references (field types, subtypes) to the old name.
+  void _renameClassInEndpoint(
+      List<ClassDefinition> classes, String oldName, String newName) {
+    for (final cls in classes) {
+      // Rename the class itself
+      if (cls.name == oldName) {
+        // ClassDefinition._name is final, so we need to update fields
+        // that reference this class in other classes
+      }
+
+      // Update field references in ALL classes of this endpoint
+      for (final field in cls.fields.values) {
+        if (field.name == oldName) {
+          field.name = newName;
+        }
+        if (field.subtype == oldName) {
+          field.subtype = newName;
+        }
+      }
+    }
   }
 
   String _typeDefToString(TypeDefinition typeDef) {

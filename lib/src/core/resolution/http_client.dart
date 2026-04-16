@@ -11,11 +11,26 @@ class HttpResult {
   final int statusCode;
   final String body;
   final Map<String, String> headers;
+  // Full request details for logging
+  final String requestUrl;
+  final String requestMethod;
+  final Map<String, String> requestHeaders;
+  final Map<String, String> requestQueryParams;
+  final dynamic requestBody;
+  final DateTime sentTime;
+  final DateTime receivedTime;
 
   const HttpResult({
     required this.statusCode,
     required this.body,
     this.headers = const {},
+    required this.requestUrl,
+    required this.requestMethod,
+    this.requestHeaders = const {},
+    this.requestQueryParams = const {},
+    this.requestBody,
+    required this.sentTime,
+    required this.receivedTime,
   });
 
   bool get isSuccess => statusCode >= 200 && statusCode < 300;
@@ -45,12 +60,18 @@ class ApiHttpClient {
           queryParams != null && queryParams.isNotEmpty ? queryParams : null,
     );
 
-    _logger.n(
-      'Fetching Response:\n'
-      'URL: $uri\n'
-      'Method: ${method.name}\n'
-      'Headers: $finalHeaders',
-    );
+
+    // Prepare request body for logging
+    dynamic requestBodyForLog;
+    if (body != null) {
+      if (body.hasFormFields) {
+        requestBodyForLog = body.formFields;
+      } else if (body.hasRawBody) {
+        requestBodyForLog = body.rawBody;
+      }
+    }
+
+    final sentTime = DateTime.now();
 
     try {
       final response = await _executeRequest(
@@ -60,14 +81,22 @@ class ApiHttpClient {
         body: body,
       );
 
+      final receivedTime = DateTime.now();
+
       if (response != null) {
         final result = HttpResult(
           statusCode: response.statusCode,
           body: response.body,
           headers: response.headers,
+          requestUrl: uri.toString(),
+          requestMethod: method.name,
+          requestHeaders: finalHeaders,
+          requestQueryParams: queryParams ?? {},
+          requestBody: requestBodyForLog,
+          sentTime: sentTime,
+          receivedTime: receivedTime,
         );
 
-        _logResponse(response, uri.toString(), method.name, finalHeaders);
         return result;
       }
       return null;
@@ -171,32 +200,4 @@ class ApiHttpClient {
     }
   }
 
-  void _logResponse(
-    http.Response response,
-    String url,
-    String method,
-    Map<String, String> headers,
-  ) {
-    final prettyResponse = _prettyJson(response.body);
-    final logMessage = 'Response:\n'
-        'URL: $url\n'
-        'Method: $method\n'
-        'Status: ${response.statusCode}\n'
-        'Response: $prettyResponse';
-
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      _logger.d(logMessage);
-    } else {
-      _logger.e(logMessage);
-    }
-  }
-
-  String _prettyJson(String rawJson) {
-    try {
-      final decoded = jsonDecode(rawJson);
-      return const JsonEncoder.withIndent('  ').convert(decoded);
-    } catch (e) {
-      return rawJson;
-    }
-  }
 }
