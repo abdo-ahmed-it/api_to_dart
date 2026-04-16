@@ -10,12 +10,14 @@ Map<String, bool> PRIMITIVE_TYPES = {
   'double': true,
   'String': true,
   'bool': true,
+  'dynamic': true,
   'DateTime': false,
   'List<DateTime>': false,
   'List<int>': true,
   'List<double>': true,
   'List<String>': true,
   'List<bool>': true,
+  'List<dynamic>': true,
   'Null': true,
 };
 

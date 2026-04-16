@@ -25,6 +25,8 @@ class ModelGenerator {
   final bool _privateFields;
   List<ClassDefinition> allClasses = <ClassDefinition>[];
   final Map<String, String> sameClassMapping = HashMap<String, String>();
+  /// Tracks used class names to avoid duplicates
+  final Set<String> _usedClassNames = {};
   late List<Hint> hints;
 
   ModelGenerator(this._rootClassName, [this._privateFields = false, hints]) {
@@ -44,10 +46,36 @@ class ModelGenerator {
     return null;
   }
 
+  /// Gets a unique class name, appending a number if the name is already taken
+  /// by a class with different fields.
+  String _uniqueClassName(String name, ClassDefinition newClass) {
+    // If name not used yet, reserve it
+    if (!_usedClassNames.contains(name)) {
+      _usedClassNames.add(name);
+      return name;
+    }
+
+    // Check if existing class with this name has the same fields
+    final existing = allClasses.where((c) => c.name == name).firstOrNull;
+    if (existing != null && existing == newClass) {
+      return name; // Same structure, reuse the name
+    }
+
+    // Name collision with different structure — find unique name
+    int suffix = 2;
+    while (_usedClassNames.contains('$name$suffix')) {
+      suffix++;
+    }
+    final uniqueName = '$name$suffix';
+    _usedClassNames.add(uniqueName);
+    return uniqueName;
+  }
+
   List<Warning> _generateClassDefinition(String className,
       dynamic jsonRawDynamicData, String path, Node? astNode) {
     List<Warning> warnings = <Warning>[];
     if (jsonRawDynamicData is List) {
+      if (jsonRawDynamicData.isEmpty) return warnings;
       final node = navigateNode(astNode, '0');
       _generateClassDefinition(className, jsonRawDynamicData[0], path, node!);
     } else {
@@ -76,8 +104,14 @@ class ModelGenerator {
         if (typeDef.isAmbiguous) {
           warnings.add(newAmbiguousListWarn('$path/$key'));
         }
+        // Convert Null type to dynamic
+        if (typeDef.name == 'Null') {
+          typeDef.name = 'dynamic';
+        }
         classDefinition.addField(key, typeDef);
       }
+
+      // Check for structurally identical class
       final similarClass = allClasses.firstWhere((cd) => cd == classDefinition,
           orElse: () => ClassDefinition(""));
       if (similarClass.name != "") {
@@ -85,8 +119,32 @@ class ModelGenerator {
         final currentClassName = classDefinition.name;
         sameClassMapping[currentClassName] = similarClassName;
       } else {
+        // Get a unique name for this class
+        final uniqueName = _uniqueClassName(className, classDefinition);
+        if (uniqueName != className) {
+          // Need to remap — the class got a new name
+          sameClassMapping[className] = uniqueName;
+          classDefinition = ClassDefinition(uniqueName, _privateFields);
+          // Re-add all fields
+          final Map<dynamic, dynamic> jsonRawData2 = jsonRawDynamicData;
+          for (var key in jsonRawData2.keys) {
+            final node = navigateNode(astNode, key);
+            var typeDef = TypeDefinition.fromDynamic(jsonRawData2[key], node);
+            if (typeDef.name == 'Class') {
+              typeDef.name = camelCase(key);
+            }
+            if (typeDef.subtype != null && typeDef.subtype == 'Class') {
+              typeDef.subtype = camelCase(key);
+            }
+            if (typeDef.name == 'Null') {
+              typeDef.name = 'dynamic';
+            }
+            classDefinition.addField(key, typeDef);
+          }
+        }
         allClasses.add(classDefinition);
       }
+
       final dependencies = classDefinition.dependencies;
       for (var dependency in dependencies) {
         List<Warning> warns = <Warning>[];
@@ -121,6 +179,8 @@ class ModelGenerator {
     final astNode = parse(rawJson, Settings());
     List<Warning> warnings =
         _generateClassDefinition(_rootClassName, jsonRawData, "", astNode);
+    // After generating all classes, replace omitted similar classes
+    // and resolve renamed classes
     for (var c in allClasses) {
       final fieldsKeys = c.fields.keys;
       for (var f in fieldsKeys) {
@@ -128,6 +188,10 @@ class ModelGenerator {
         if (typeForField != null) {
           if (sameClassMapping.containsKey(typeForField.name)) {
             c.fields[f]!.name = sameClassMapping[typeForField.name]!;
+          }
+          if (typeForField.subtype != null &&
+              sameClassMapping.containsKey(typeForField.subtype)) {
+            c.fields[f]!.subtype = sameClassMapping[typeForField.subtype]!;
           }
         }
       }

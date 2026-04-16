@@ -104,8 +104,10 @@ class TypeDefinition {
     final jsonKey = "json['$key']";
     final fieldKey =
         fixFieldName(key, typeDef: this, privateField: privateField);
-    if (name == 'List' && subtype == 'Null') {
-      // Empty array — treat as List<dynamic>
+    if (name == 'dynamic' || name == 'Null') {
+      return "$fieldKey = json['$key'];";
+    }
+    if (name == 'List' && (subtype == 'Null' || subtype == 'dynamic')) {
       return "$fieldKey = json['$key'] != null ? List<dynamic>.from(json['$key']) : null;";
     }
     if (isPrimitive) {
@@ -128,8 +130,10 @@ class TypeDefinition {
     final fieldKey =
         fixFieldName(key, typeDef: this, privateField: privateField);
     final thisKey = fieldKey;
-    if (name == 'List' && subtype == 'Null') {
-      // Empty array — just assign directly
+    if (name == 'dynamic' || name == 'Null') {
+      return "result['$key'] = $thisKey;";
+    }
+    if (name == 'List' && (subtype == 'Null' || subtype == 'dynamic')) {
       return "result['$key'] = $thisKey;";
     }
     if (isPrimitive) {
@@ -214,7 +218,12 @@ class ClassDefinition {
   }
 
   void _addTypeDef(TypeDefinition typeDef, StringBuffer sb) {
-    if (typeDef.name == 'List' && typeDef.subtype == 'Null') {
+    if (typeDef.name == 'Null') {
+      sb.write('dynamic');
+      return;
+    }
+    if (typeDef.name == 'List' &&
+        (typeDef.subtype == 'Null' || typeDef.subtype == 'dynamic')) {
       sb.write('List<dynamic>');
       return;
     }
