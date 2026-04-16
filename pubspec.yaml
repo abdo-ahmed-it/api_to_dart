@@ -1,7 +1,8 @@
 name: api_request_generator
-description: "A Dart CLI tool to generate API request actions from Postman collections, OpenAPI specs, and more"
+description: "Generate type-safe API request actions and response models from Postman, OpenAPI, Apidog, or YAML with an interactive terminal UI."
 version: 0.1.0
-homepage:
+repository: https://github.com/abdo-ahmed-it/api_request_generator
+issue_tracker: https://github.com/abdo-ahmed-it/api_request_generator/issues
 
 executables:
   apigen: api_request_generator

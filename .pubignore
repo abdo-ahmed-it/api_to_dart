@@ -1,0 +1,12 @@
+example/android/
+example/ios/
+example/linux/
+example/macos/
+example/windows/
+example/web/
+example/lib/actions/
+example/lib/features/
+example/.apigen/
+.apigen/
+.apigen_debug_export.json
+.apigen_temp_*
