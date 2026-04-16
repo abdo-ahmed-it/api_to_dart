@@ -1,10 +1,10 @@
 import 'dart:collection';
 
-
-import 'package:api_request_generator/src/jsonToDart/helpers.dart';
-import 'package:api_request_generator/src/jsonToDart/syntax.dart';
 import 'package:dart_style/dart_style.dart';
 import 'package:json_ast/json_ast.dart' show parse, Settings, Node;
+
+import 'helpers.dart';
+import 'syntax.dart';
 
 class DartCode extends WithWarning<String> {
   DartCode(super.result, super.warnings);
@@ -48,7 +48,6 @@ class ModelGenerator {
       dynamic jsonRawDynamicData, String path, Node? astNode) {
     List<Warning> warnings = <Warning>[];
     if (jsonRawDynamicData is List) {
-      // if first element is an array, start in the first element.
       final node = navigateNode(astNode, '0');
       _generateClassDefinition(className, jsonRawDynamicData[0], path, node!);
     } else {
@@ -92,10 +91,7 @@ class ModelGenerator {
       for (var dependency in dependencies) {
         List<Warning> warns = <Warning>[];
         if (dependency.typeDef.name == 'List') {
-          // only generate dependency class if the array is not empty
           if (jsonRawData[dependency.name].length > 0) {
-            // when list has ambiguous values, take the first one, otherwise merge all objects
-            // into a single one
             dynamic toAnalyze;
             if (!dependency.typeDef.isAmbiguous) {
               WithWarning<Map> mergeWithWarning = mergeObjectList(
@@ -120,16 +116,11 @@ class ModelGenerator {
     return warnings;
   }
 
-  /// generateUnsafeDart will generate all classes and append one after another
-  /// in a single string. The [rawJson] param is assumed to be a properly
-  /// formatted JSON string. The dart code is not validated so invalid dart code
-  /// might be returned
   DartCode generateUnsafeDart(String rawJson) {
     final jsonRawData = decodeJSON(rawJson);
     final astNode = parse(rawJson, Settings());
     List<Warning> warnings =
         _generateClassDefinition(_rootClassName, jsonRawData, "", astNode);
-    // after generating all classes, replace the omited similar classes.
     for (var c in allClasses) {
       final fieldsKeys = c.fields.keys;
       for (var f in fieldsKeys) {
@@ -144,12 +135,10 @@ class ModelGenerator {
     return DartCode(allClasses.map((c) => c.toString()).join('\n'), warnings);
   }
 
-  /// generateDartClasses will generate all classes and append one after another
-  /// in a single string. The [rawJson] param is assumed to be a properly
-  /// formatted JSON string. If the generated dart is invalid it will throw an error.
   DartCode generateDartClasses(String rawJson) {
     final unsafeDartCode = generateUnsafeDart(rawJson);
-    final formatter = DartFormatter(languageVersion: DartFormatter.latestLanguageVersion);
+    final formatter =
+        DartFormatter(languageVersion: DartFormatter.latestLanguageVersion);
     return DartCode(
         formatter.format(unsafeDartCode.code), unsafeDartCode.warnings);
   }

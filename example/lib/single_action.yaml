@@ -1,0 +1,40 @@
+# Request 1: إرسال Body كـ urlencoded
+base_url: https://to-deal.code-link.com/api
+path: /auth/register
+method: POST
+action_name: Register
+file_name: custom_register.dart
+output_dir: lib/features/account/actions
+auth:
+  type: none
+#  token:
+headers:
+  Content-Type: application/x-www-form-urlencoded
+  Accept: application/json
+query_params:
+  source: app
+body:
+  mode: urlencoded
+  data:
+    type: phone
+    phone: 5555555555
+    email: user@example.com
+
+# Request 2: إرسال Query Params بدون Body
+# يمكن إضافته كـ request تاني لو الكود يدعم multiple requests
+#base_url: https://to-deal.code-link.com/api
+#path: /users/search
+#method: GET
+#action_name: SearchUsers
+#file_name: search_users.dart
+#output_dir: lib/features/users/actions
+#auth:
+#  type: bearer
+#  token: 47|5ZWsMTsQQqZ4aGW8lEYOL548RxSdjXw5c8xvpM2ic1c201b9
+#headers:
+#  Accept: application/json
+#query_params:
+#  query: John
+#  page: 1
+#  limit: 10
+#body: null

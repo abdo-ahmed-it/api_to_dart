@@ -1,7 +1,7 @@
 import 'dart:convert' as convert;
 import 'dart:math';
 
-import 'package:api_request_generator/src/jsonToDart/syntax.dart';
+import 'syntax.dart';
 import 'package:json_ast/json_ast.dart'
     show Node, ObjectNode, ArrayNode, LiteralNode, PropertyNode;
 
@@ -84,10 +84,8 @@ WithWarning<Map> mergeObj(Map obj, Map other, String path) {
       final String t = getTypeName(clone[k]);
       if (t != otherType) {
         if (t == 'int' && otherType == 'double') {
-          // if double was found instead of int, assign the double
           clone[k] = v;
         } else if (clone[k].runtimeType != 'double' && v.runtimeType != 'int') {
-          // if types are not equal, then
           warnings.add(newAmbiguousType('$path/$k'));
         }
       } else if (t == 'List') {
@@ -131,10 +129,8 @@ WithWarning<Map> mergeObjectList(List<dynamic> list, String path,
           final String otherType = getTypeName(v);
           if (t != otherType) {
             if (t == 'int' && otherType == 'double') {
-              // if double was found instead of int, assign the double
               obj[k] = v;
             } else if (t != 'double' && otherType != 'int') {
-              // if types are not equal, then
               int realIndex = i;
               if (idx != -1) {
                 realIndex = idx - i;
@@ -146,7 +142,6 @@ WithWarning<Map> mergeObjectList(List<dynamic> list, String path,
             List l = List.from(obj[k]);
             final int beginIndex = l.length;
             l.addAll(v);
-            // bug is here
             final mergeableType = mergeableListType(l);
             if (ListType.Object == mergeableType.listType) {
               WithWarning<Map> mergedList =
@@ -217,7 +212,6 @@ String getTypeName(dynamic obj) {
   } else if (obj is List) {
     return 'List';
   } else {
-    // assumed class
     return 'Class';
   }
 }

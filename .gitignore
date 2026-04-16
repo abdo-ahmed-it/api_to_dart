@@ -29,3 +29,8 @@ migrate_working_dir/
 .flutter-plugins
 .flutter-plugins-dependencies
 build/
+
+# API Request Generator config (contains API keys)
+.apigen/
+.apigen_debug_export.json
+.apigen_temp_*

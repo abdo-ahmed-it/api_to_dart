@@ -1,4 +1,4 @@
-import 'package:api_request_generator/src/jsonToDart/helpers.dart';
+import 'helpers.dart';
 import 'package:json_ast/json_ast.dart' show Node;
 
 const String emptyListWarn = "list is empty";
@@ -53,7 +53,6 @@ class TypeDefinition {
           }
         }
       } else {
-        // when array is empty insert Null just to warn the user
         elemType = "Null";
       }
       return TypeDefinition(type,
@@ -105,6 +104,10 @@ class TypeDefinition {
     final jsonKey = "json['$key']";
     final fieldKey =
         fixFieldName(key, typeDef: this, privateField: privateField);
+    if (name == 'List' && subtype == 'Null') {
+      // Empty array — treat as List<dynamic>
+      return "$fieldKey = json['$key'] != null ? List<dynamic>.from(json['$key']) : null;";
+    }
     if (isPrimitive) {
       if (name == "List") {
         return "$fieldKey = json['$key'].cast<$subtype>();";
@@ -115,10 +118,8 @@ class TypeDefinition {
     } else if (name == "DateTime") {
       return "$fieldKey = DateTime.tryParse(json['$key']);";
     } else if (name == 'List') {
-      // list of class
       return "if (json['$key'] != null) {\n\t\t\t$fieldKey = <$subtype>[];\n\t\t\tjson['$key'].forEach((v) { $fieldKey!.add( $subtype.fromJson(v)); });\n\t\t}";
     } else {
-      // class
       return "$fieldKey = json['$key'] != null ? ${_buildParseClass(jsonKey)} : null;";
     }
   }
@@ -127,17 +128,19 @@ class TypeDefinition {
     final fieldKey =
         fixFieldName(key, typeDef: this, privateField: privateField);
     final thisKey = fieldKey;
+    if (name == 'List' && subtype == 'Null') {
+      // Empty array — just assign directly
+      return "result['$key'] = $thisKey;";
+    }
     if (isPrimitive) {
-      return "data['$key'] = $thisKey;";
+      return "result['$key'] = $thisKey;";
     } else if (name == 'List') {
-      // class list
       return """if ($thisKey != null) {
-      data['$key'] = $thisKey!.map((v) => ${_buildToJsonClass('v', false)}).toList();
+      result['$key'] = $thisKey!.map((v) => ${_buildToJsonClass('v', false)}).toList();
     }""";
     } else {
-      // class
       return """if ($thisKey != null) {
-      data['$key'] = ${_buildToJsonClass(thisKey)};
+      result['$key'] = ${_buildToJsonClass(thisKey)};
     }""";
     }
   }
@@ -211,6 +214,10 @@ class ClassDefinition {
   }
 
   void _addTypeDef(TypeDefinition typeDef, StringBuffer sb) {
+    if (typeDef.name == 'List' && typeDef.subtype == 'Null') {
+      sb.write('List<dynamic>');
+      return;
+    }
     sb.write(typeDef.name);
     if (typeDef.subtype != null) {
       sb.write('<${typeDef.subtype}>');
@@ -312,11 +319,11 @@ class ClassDefinition {
   String get _jsonGenFunc {
     final sb = StringBuffer();
     sb.write(
-        '\tMap<String, dynamic> toJson() {\n\t\tfinal Map<String, dynamic> data =  <String, dynamic>{};\n');
+        '\tMap<String, dynamic> toJson() {\n\t\tfinal Map<String, dynamic> result =  <String, dynamic>{};\n');
     for (var k in fields.keys) {
       sb.write('\t\t${fields[k]!.toJsonExpression(k, privateFields)}\n');
     }
-    sb.write('\t\treturn data;\n');
+    sb.write('\t\treturn result;\n');
     sb.write('\t}');
     return sb.toString();
   }
