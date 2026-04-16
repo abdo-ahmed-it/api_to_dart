@@ -620,7 +620,7 @@ class GenerateWizard {
   }) async {
     const outputDir = 'lib/actions';
     final httpClient = ApiHttpClient(logger: _logger);
-    final resolver = ResponseResolver(httpClient: httpClient, logger: _logger);
+    final resolver = ResponseResolver(httpClient: httpClient);
     final emitter = CodeEmitter(logger: _logger);
 
     final endpointResponses = <ApiEndpoint, ResponseDefinition?>{};

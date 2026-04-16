@@ -154,7 +154,7 @@ class GenerateCommand extends Command {
 
     // 4. Resolve responses and batch generate with deduplication
     final httpClient = ApiHttpClient(logger: logger);
-    final resolver = ResponseResolver(httpClient: httpClient, logger: logger);
+    final resolver = ResponseResolver(httpClient: httpClient);
     final emitter = CodeEmitter(logger: logger);
 
     final resolvedBaseUrl = baseUrl ?? '';

@@ -24,7 +24,6 @@ export 'src/core/sources/api_fetchers/config_storage.dart';
 export 'src/core/generation/action_generator.dart';
 export 'src/core/generation/body_processor.dart';
 export 'src/core/generation/code_emitter.dart';
-export 'src/core/generation/model_deduplicator.dart';
 export 'src/core/generation/response_generator.dart';
 
 // Resolution

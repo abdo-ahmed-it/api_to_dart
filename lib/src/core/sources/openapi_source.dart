@@ -556,7 +556,7 @@ class OpenApiSource implements ApiSource {
 
     final type = schema['type']?.toString();
     final example = schema['example'];
-    if (example != null && example is! String || example is String && !(example as String).contains('{{')) {
+    if (example != null && example is! String || example is String && !example.contains('{{')) {
       // Use actual example if it's not a mock template
       if (example != null && example.toString().contains('{{')) {
         // Skip mock templates like {{$person.fullName}}

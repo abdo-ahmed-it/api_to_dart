@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import '../logger/logger.dart';
 import '../models/api_endpoint.dart';
 import '../models/auth_definition.dart';
 import '../models/request_log.dart';
@@ -16,13 +15,10 @@ class ResolveResult {
 
 class ResponseResolver {
   final ApiHttpClient _httpClient;
-  final Logger _logger;
 
   ResponseResolver({
     required ApiHttpClient httpClient,
-    required Logger logger,
-  })  : _httpClient = httpClient,
-        _logger = logger;
+  }) : _httpClient = httpClient;
 
   /// Resolves the response for an endpoint using the fallback chain:
   /// 1. Example with good data → use directly
@@ -139,23 +135,6 @@ class ResponseResolver {
     }
 
     return null;
-  }
-
-  bool _hasEmptyArrays(String jsonBody) {
-    try {
-      final decoded = jsonDecode(jsonBody);
-      return _checkEmptyArrays(decoded);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  bool _checkEmptyArrays(dynamic value) {
-    if (value is List && value.isEmpty) return true;
-    if (value is Map) {
-      return value.values.any(_checkEmptyArrays);
-    }
-    return false;
   }
 
   String? _schemaToJson(Map<String, dynamic> schema) {

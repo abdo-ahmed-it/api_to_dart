@@ -18,6 +18,7 @@ class _TreeNode {
     required this.label,
     this.depth = 0,
     this.isFolder = false,
+    // ignore: unused_element_parameter
     this.isExpanded = false,
     // ignore: unused_element_parameter
     this.isSelected = false,
@@ -159,8 +160,11 @@ class EndpointSelector {
 
     final lines = <String>[];
 
-    lines.add(TerminalUtils.bold(
-        'Select endpoints to generate ($selectedCount/$totalCount selected):'));
+    final counter = selectedCount > 0
+        ? TerminalUtils.green('$selectedCount')
+        : '$selectedCount';
+    lines.add(
+        '${TerminalUtils.bold('Select endpoints')} ${TerminalUtils.gray('·')} $counter${TerminalUtils.gray('/$totalCount selected')}');
     lines.add('');
 
     // Scroll-up indicator
@@ -171,30 +175,43 @@ class EndpointSelector {
     for (int i = windowStart; i < windowEnd; i++) {
       final node = visible[i];
       final isCursor = i == cursor;
-      final indent = '   ' * node.depth;
-      final pointer = isCursor ? TerminalUtils.cyan(' > ') : '   ';
+      final indent = '  ' * node.depth;
+      final pointer = isCursor ? TerminalUtils.cyan('›') : ' ';
 
       if (node.isFolder) {
         final arrow = node.isExpanded ? '▼' : '▶';
-        final folderCheck = _allChildrenSelected(node) ? '✓' : ' ';
-        final label = TerminalUtils.yellow('📁 ${node.label}');
-        lines.add('$pointer$indent[$folderCheck] $arrow $label');
+        final allSelected = _allChildrenSelected(node);
+        final someSelected = !allSelected && _someChildrenSelected(node);
+        final check = allSelected
+            ? TerminalUtils.green('◉')
+            : someSelected
+                ? TerminalUtils.yellow('◉')
+                : '◎';
+        final count = TerminalUtils.gray('(${node.children.length})');
+        final label = isCursor
+            ? TerminalUtils.cyan('${node.label} $count')
+            : TerminalUtils.yellow('${node.label} $count');
+        lines.add(' $pointer ${indent}$check $arrow $label');
       } else {
-        final check = node.isSelected ? TerminalUtils.green('✓') : ' ';
-        final methodColor = _methodColor(node.label);
-        lines.add('$pointer$indent[$check] $methodColor');
+        final check =
+            node.isSelected ? TerminalUtils.green('●') : TerminalUtils.gray('○');
+        final methodColor = _methodColor(node.label, isCursor);
+        lines.add(' $pointer ${indent}$check $methodColor');
       }
     }
 
-    // Scroll-down indicator
+    // Scroll indicators
     final below = visible.length - windowEnd;
-    if (below > 0) {
-      lines.add(TerminalUtils.gray('   ↓ $below more below'));
+    if (windowStart > 0 || below > 0) {
+      final parts = <String>[];
+      if (windowStart > 0) parts.add('↑ $windowStart above');
+      if (below > 0) parts.add('↓ $below below');
+      lines.add(TerminalUtils.gray('   ${parts.join('  ·  ')}'));
     }
 
     lines.add('');
     lines.add(TerminalUtils.gray(
-        '  ↑/↓ Navigate  Space Toggle  → Expand  ← Collapse  a All  n None  Enter Generate  q Cancel'));
+        '  ↑↓ move  ␣ select  → expand  ← collapse  a all  n none  ⏎ generate  q quit'));
 
     // Write each line, clearing the rest of the line to avoid leftover chars
     for (final line in lines) {
@@ -310,6 +327,17 @@ class EndpointSelector {
     return true;
   }
 
+  bool _someChildrenSelected(_TreeNode folder) {
+    for (final child in folder.children) {
+      if (child.isFolder) {
+        if (_someChildrenSelected(child)) return true;
+      } else {
+        if (child.isSelected) return true;
+      }
+    }
+    return false;
+  }
+
   void _setChildrenSelected(_TreeNode folder, bool selected) {
     for (final child in folder.children) {
       if (child.isFolder) {
@@ -347,26 +375,48 @@ class EndpointSelector {
     }
   }
 
-  String _methodColor(String label) {
+  String _methodColor(String label, [bool isCursor = false]) {
     final parts = label.trim().split(RegExp(r'\s+'));
     if (parts.length < 2) return label;
 
     final method = parts[0].trim();
-    final rest = parts.sublist(1).join(' ');
+    final path = parts.sublist(1).join(' ');
 
+    // Shorten path: show last meaningful segments
+    final shortPath = _shortenPath(path);
+
+    String methodStyled;
     switch (method.toUpperCase()) {
       case 'GET':
-        return '${TerminalUtils.green(method.padRight(6))}  $rest';
+        methodStyled = TerminalUtils.green(method.padRight(6));
+        break;
       case 'POST':
-        return '${TerminalUtils.yellow(method.padRight(6))}  $rest';
+        methodStyled = TerminalUtils.yellow(method.padRight(6));
+        break;
       case 'PUT':
-        return '${TerminalUtils.blue(method.padRight(6))}  $rest';
+        methodStyled = TerminalUtils.blue(method.padRight(6));
+        break;
       case 'PATCH':
-        return '${TerminalUtils.cyan(method.padRight(6))}  $rest';
+        methodStyled = TerminalUtils.cyan(method.padRight(6));
+        break;
       case 'DELETE':
-        return '\x1B[31m${method.padRight(6)}\x1B[0m  $rest';
+        methodStyled = '\x1B[31m${method.padRight(6)}\x1B[0m';
+        break;
       default:
-        return label;
+        methodStyled = method.padRight(6);
     }
+
+    if (isCursor) {
+      return '$methodStyled ${TerminalUtils.cyan(shortPath)}';
+    }
+    return '$methodStyled ${TerminalUtils.gray(shortPath)}';
+  }
+
+  /// Shortens a path for display: keeps last 3 segments
+  String _shortenPath(String path) {
+    final segments =
+        path.split('/').where((s) => s.isNotEmpty).toList();
+    if (segments.length <= 3) return path;
+    return '.../${segments.sublist(segments.length - 3).join('/')}';
   }
 }
