@@ -40,11 +40,10 @@ class TerminalUtils {
     try {
       final byte = stdin.readByteSync();
 
+      // Unix escape sequences: ESC [ code
       if (byte == 27) {
-        // Escape sequence
         final next = stdin.readByteSync();
         if (next == 91) {
-          // CSI sequence
           final code = stdin.readByteSync();
           switch (code) {
             case 65:
@@ -62,17 +61,41 @@ class TerminalUtils {
         return 'escape';
       }
 
+      // Windows arrow keys: 0xE0 (224) then code
+      // Also 0x00 for some function keys
+      if (byte == 224 || byte == 0) {
+        final code = stdin.readByteSync();
+        switch (code) {
+          case 72:
+            return 'up';
+          case 80:
+            return 'down';
+          case 77:
+            return 'right';
+          case 75:
+            return 'left';
+          default:
+            return 'unknown';
+        }
+      }
+
       switch (byte) {
-        case 10: // Enter
-        case 13:
+        case 10: // Enter (Unix)
+        case 13: // Enter (Windows)
           return 'enter';
         case 32: // Space
           return 'space';
         case 113: // q
           return 'q';
+        case 81: // Q
+          return 'q';
         case 97: // a
           return 'a';
+        case 65: // A
+          return 'a';
         case 110: // n
+          return 'n';
+        case 78: // N
           return 'n';
         default:
           return String.fromCharCode(byte);
