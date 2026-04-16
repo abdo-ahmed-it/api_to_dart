@@ -30,41 +30,53 @@ class EndpointSelector {
   final EndpointTree tree;
   bool _firstRender = true;
   int _lastRenderedLines = 0;
+  List<_TreeNode>? _nodes;
+  int _cursor = 0;
 
   EndpointSelector(this.tree);
 
+  /// Deselects all endpoints but preserves folder expand/collapse state.
+  void deselectAll() {
+    if (_nodes != null) {
+      _selectAll(_nodes!, false);
+    }
+  }
+
   /// Shows an interactive tree selector and returns the selected endpoints.
-  /// Returns null if the user cancels.
+  /// Returns null if the user cancels (q/escape).
+  /// Preserves tree state (expand/collapse) between calls.
   List<ApiEndpoint>? selectInteractively() {
-    final nodes = _buildFlatNodes();
+    _nodes ??= _buildFlatNodes();
+    final nodes = _nodes!;
     if (nodes.isEmpty) {
       print('No endpoints found in the collection.');
       return null;
     }
 
-    int cursor = 0;
+    _firstRender = true;
+    _lastRenderedLines = 0;
 
     TerminalUtils.hideCursor();
 
     try {
       // Initial render
-      _renderFrame(nodes, cursor);
+      _renderFrame(nodes, _cursor);
 
       while (true) {
         final key = TerminalUtils.readKey();
 
         switch (key) {
           case 'up':
-            if (cursor > 0) cursor--;
+            if (_cursor > 0) _cursor--;
             break;
           case 'down':
             final visible = _visibleNodes(nodes);
-            if (cursor < visible.length - 1) cursor++;
+            if (_cursor < visible.length - 1) _cursor++;
             break;
           case 'space':
             final visible = _visibleNodes(nodes);
-            if (cursor < visible.length) {
-              final node = visible[cursor];
+            if (_cursor < visible.length) {
+              final node = visible[_cursor];
               if (node.isFolder) {
                 _toggleFolder(node);
               } else {
@@ -74,8 +86,8 @@ class EndpointSelector {
             break;
           case 'right':
             final visible = _visibleNodes(nodes);
-            if (cursor < visible.length) {
-              final node = visible[cursor];
+            if (_cursor < visible.length) {
+              final node = visible[_cursor];
               if (node.isFolder && !node.isExpanded) {
                 node.isExpanded = true;
               }
@@ -83,14 +95,13 @@ class EndpointSelector {
             break;
           case 'left':
             final visible = _visibleNodes(nodes);
-            if (cursor < visible.length) {
-              final node = visible[cursor];
+            if (_cursor < visible.length) {
+              final node = visible[_cursor];
               if (node.isFolder && node.isExpanded) {
                 node.isExpanded = false;
-                // Adjust cursor if it was on a now-hidden child
                 final newVisible = _visibleNodes(nodes);
-                if (cursor >= newVisible.length) {
-                  cursor = newVisible.length - 1;
+                if (_cursor >= newVisible.length) {
+                  _cursor = newVisible.length - 1;
                 }
               }
             }
@@ -113,7 +124,7 @@ class EndpointSelector {
         }
 
         // Re-render
-        _renderFrame(nodes, cursor);
+        _renderFrame(nodes, _cursor);
       }
     } catch (_) {
       TerminalUtils.showCursor();

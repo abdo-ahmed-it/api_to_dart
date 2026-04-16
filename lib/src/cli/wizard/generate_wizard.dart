@@ -93,9 +93,10 @@ class GenerateWizard {
     stdout.writeln('');
 
     // Step 2 & 3: Select and generate loop
+    final selector = EndpointSelector(tree);
+
     while (true) {
       stdout.writeln('');
-      final selector = EndpointSelector(tree);
       final selected = selector.selectInteractively();
 
       if (selected == null || selected.isEmpty) {
@@ -114,12 +115,8 @@ class GenerateWizard {
         urlVariables: loadResult.urlVariables,
       );
 
-      stdout.writeln('');
-      final again = promptConfirm(
-        message: 'Select more endpoints?',
-        defaultValue: false,
-      );
-      if (!again) break;
+      // Deselect generated endpoints but keep tree state
+      selector.deselectAll();
     }
   }
 
@@ -659,16 +656,27 @@ class GenerateWizard {
           token: token,
         );
       } catch (e) {
-        _logger.w('Failed to resolve response for ${endpoint.name}: $e');
         result = ResolveResult(response: ResponseDefinition.empty);
       }
 
-      endpointResponses[cleanEndpoint] = result.response;
-
-      // Write request log file
+      // Write log file for every request
+      final logFileName = cleanEndpoint.fileName.replaceAll('.dart', '');
       if (result.log != null) {
-        result.log!.writeToFile(outputDir, cleanEndpoint.fileName.replaceAll('.dart', ''));
+        result.log!.writeToFile(outputDir, logFileName);
       }
+
+      // Check if request failed (has log with non-success status)
+      if (result.log != null &&
+          result.log!.statusCode != null &&
+          (result.log!.statusCode! < 200 || result.log!.statusCode! >= 300)) {
+        final logPath = '${Directory.current.path}/$outputDir/logs/$logFileName.log';
+        final link = TerminalUtils.fileLink(logPath, label: 'logs/$logFileName.log');
+        _logger.e(
+            '✗ ${cleanEndpoint.name} (${result.log!.statusCode}) → $link');
+        continue; // Skip generating action for failed requests
+      }
+
+      endpointResponses[cleanEndpoint] = result.response;
     }
 
     final generated = emitter.emitBatch(

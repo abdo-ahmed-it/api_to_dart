@@ -172,15 +172,25 @@ class GenerateCommand extends Command {
           token: token,
         );
       } catch (e) {
-        logger.w(
-            'Failed to resolve response for ${endpoint.name}: $e');
         result = ResolveResult(response: ResponseDefinition.empty);
       }
-      endpointResponses[endpoint] = result.response;
 
+      final logFileName = endpoint.fileName.replaceAll('.dart', '');
       if (result.log != null) {
-        result.log!.writeToFile(outputDir, endpoint.fileName.replaceAll('.dart', ''));
+        result.log!.writeToFile(outputDir, logFileName);
       }
+
+      if (result.log != null &&
+          result.log!.statusCode != null &&
+          (result.log!.statusCode! < 200 || result.log!.statusCode! >= 300)) {
+        final logPath = '${Directory.current.path}/$outputDir/logs/$logFileName.log';
+        // Use full path — most terminals make it clickable
+        logger.e(
+            '✗ ${endpoint.name} (${result.log!.statusCode}) → $logPath');
+        continue;
+      }
+
+      endpointResponses[endpoint] = result.response;
     }
 
     final generated = emitter.emitBatch(

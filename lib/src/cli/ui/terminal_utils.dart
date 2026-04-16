@@ -24,6 +24,13 @@ class TerminalUtils {
   static String bold(String text) => '\x1B[1m$text\x1B[0m';
   static String cyan(String text) => '\x1B[36m$text\x1B[0m';
 
+  /// Creates a clickable file link using OSC 8 hyperlink sequence.
+  /// Works in VS Code terminal, iTerm2, macOS Terminal, etc.
+  static String fileLink(String filePath, {String? label}) {
+    final displayText = label ?? filePath;
+    return '\x1B]8;;file://$filePath\x1B\\$displayText\x1B]8;;\x1B\\';
+  }
+
   /// Read a single keypress from stdin.
   /// Returns the key as a string representation.
   static String readKey() {
