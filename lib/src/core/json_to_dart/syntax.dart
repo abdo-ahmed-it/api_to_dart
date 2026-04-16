@@ -241,14 +241,24 @@ class ClassDefinition {
       final sb = StringBuffer();
       sb.write('\t');
       _addTypeDef(f, sb);
-      sb.write('? $fieldName;');
+      // dynamic is already nullable, don't add ?
+      if (f.name == 'dynamic' || f.name == 'Null') {
+        sb.write(' $fieldName;');
+      } else {
+        sb.write('? $fieldName;');
+      }
       return sb.toString();
     }).join('\n');
+  }
+
+  String _nullableSuffix(TypeDefinition f) {
+    return (f.name == 'dynamic' || f.name == 'Null') ? '' : '?';
   }
 
   String get _gettersSetters {
     return fields.keys.map((key) {
       final f = fields[key]!;
+      final ns = _nullableSuffix(f);
       final publicFieldName =
           fixFieldName(key, typeDef: f, privateField: false);
       final privateFieldName =
@@ -257,9 +267,9 @@ class ClassDefinition {
       sb.write('\t');
       _addTypeDef(f, sb);
       sb.write(
-          '? get $publicFieldName => $privateFieldName;\n\tset $publicFieldName(');
+          '$ns get $publicFieldName => $privateFieldName;\n\tset $publicFieldName(');
       _addTypeDef(f, sb);
-      sb.write('? $publicFieldName) => $privateFieldName = $publicFieldName;');
+      sb.write('$ns $publicFieldName) => $privateFieldName = $publicFieldName;');
       return sb.toString();
     }).join('\n');
   }
@@ -271,10 +281,11 @@ class ClassDefinition {
     var len = fields.keys.length - 1;
     for (var key in fields.keys) {
       final f = fields[key]!;
+      final ns = _nullableSuffix(f);
       final publicFieldName =
           fixFieldName(key, typeDef: f, privateField: false);
       _addTypeDef(f, sb);
-      sb.write('? $publicFieldName');
+      sb.write('$ns $publicFieldName');
       if (i != len) {
         sb.write(', ');
       }
