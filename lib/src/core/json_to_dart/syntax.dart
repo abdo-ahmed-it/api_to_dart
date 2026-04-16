@@ -1,5 +1,4 @@
 import 'helpers.dart';
-import 'package:json_ast/json_ast.dart' show Node;
 
 const String emptyListWarn = "list is empty";
 const String ambiguousListWarn = "list is ambiguous";
@@ -37,7 +36,7 @@ class TypeDefinition {
   bool isAmbiguous = false;
   bool _isPrimitive = false;
 
-  factory TypeDefinition.fromDynamic(dynamic obj, Node? astNode) {
+  factory TypeDefinition.fromDynamic(dynamic obj) {
     bool isAmbiguous = false;
     final type = getTypeName(obj);
     if (type == 'List') {
@@ -56,18 +55,15 @@ class TypeDefinition {
         elemType = "Null";
       }
       return TypeDefinition(type,
-          astNode: astNode, subtype: elemType, isAmbiguous: isAmbiguous);
+          subtype: elemType, isAmbiguous: isAmbiguous);
     }
-    return TypeDefinition(type, astNode: astNode, isAmbiguous: isAmbiguous);
+    return TypeDefinition(type, isAmbiguous: isAmbiguous);
   }
 
   TypeDefinition(this.name,
-      {this.subtype, this.isAmbiguous = false, Node? astNode}) {
+      {this.subtype, this.isAmbiguous = false}) {
     if (subtype == null) {
       _isPrimitive = isPrimitiveType(name);
-      if (name == 'int' && isASTLiteralDouble(astNode)) {
-        name = 'double';
-      }
     } else {
       _isPrimitive = isPrimitiveType('$name<$subtype>');
     }

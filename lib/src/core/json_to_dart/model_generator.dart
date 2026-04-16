@@ -1,7 +1,6 @@
 import 'dart:collection';
 
 import 'package:dart_style/dart_style.dart';
-import 'package:json_ast/json_ast.dart' show parse, Settings, Node;
 
 import 'helpers.dart';
 import 'syntax.dart';
@@ -25,7 +24,6 @@ class ModelGenerator {
   final bool _privateFields;
   List<ClassDefinition> allClasses = <ClassDefinition>[];
   final Map<String, String> sameClassMapping = HashMap<String, String>();
-  /// Tracks used class names to avoid duplicates
   final Set<String> _usedClassNames = {};
   late List<Hint> hints;
 
@@ -46,22 +44,17 @@ class ModelGenerator {
     return null;
   }
 
-  /// Gets a unique class name, appending a number if the name is already taken
-  /// by a class with different fields.
   String _uniqueClassName(String name, ClassDefinition newClass) {
-    // If name not used yet, reserve it
     if (!_usedClassNames.contains(name)) {
       _usedClassNames.add(name);
       return name;
     }
 
-    // Check if existing class with this name has the same fields
     final existing = allClasses.where((c) => c.name == name).firstOrNull;
     if (existing != null && existing == newClass) {
-      return name; // Same structure, reuse the name
+      return name;
     }
 
-    // Name collision with different structure — find unique name
     int suffix = 2;
     while (_usedClassNames.contains('$name$suffix')) {
       suffix++;
@@ -71,13 +64,12 @@ class ModelGenerator {
     return uniqueName;
   }
 
-  List<Warning> _generateClassDefinition(String className,
-      dynamic jsonRawDynamicData, String path, Node? astNode) {
+  List<Warning> _generateClassDefinition(
+      String className, dynamic jsonRawDynamicData, String path) {
     List<Warning> warnings = <Warning>[];
     if (jsonRawDynamicData is List) {
       if (jsonRawDynamicData.isEmpty) return warnings;
-      final node = navigateNode(astNode, '0');
-      _generateClassDefinition(className, jsonRawDynamicData[0], path, node!);
+      _generateClassDefinition(className, jsonRawDynamicData[0], path);
     } else {
       final Map<dynamic, dynamic> jsonRawData = jsonRawDynamicData;
       final keys = jsonRawData.keys;
@@ -86,11 +78,10 @@ class ModelGenerator {
       for (var key in keys) {
         TypeDefinition typeDef;
         final hint = _hintForPath('$path/$key');
-        final node = navigateNode(astNode, key);
         if (hint != null) {
-          typeDef = TypeDefinition(hint.type, astNode: node);
+          typeDef = TypeDefinition(hint.type);
         } else {
-          typeDef = TypeDefinition.fromDynamic(jsonRawData[key], node);
+          typeDef = TypeDefinition.fromDynamic(jsonRawData[key]);
         }
         if (typeDef.name == 'Class') {
           typeDef.name = camelCase(key);
@@ -104,14 +95,12 @@ class ModelGenerator {
         if (typeDef.isAmbiguous) {
           warnings.add(newAmbiguousListWarn('$path/$key'));
         }
-        // Convert Null type to dynamic
         if (typeDef.name == 'Null') {
           typeDef.name = 'dynamic';
         }
         classDefinition.addField(key, typeDef);
       }
 
-      // Check for structurally identical class
       final similarClass = allClasses.firstWhere((cd) => cd == classDefinition,
           orElse: () => ClassDefinition(""));
       if (similarClass.name != "") {
@@ -119,17 +108,13 @@ class ModelGenerator {
         final currentClassName = classDefinition.name;
         sameClassMapping[currentClassName] = similarClassName;
       } else {
-        // Get a unique name for this class
         final uniqueName = _uniqueClassName(className, classDefinition);
         if (uniqueName != className) {
-          // Need to remap — the class got a new name
           sameClassMapping[className] = uniqueName;
           classDefinition = ClassDefinition(uniqueName, _privateFields);
-          // Re-add all fields
           final Map<dynamic, dynamic> jsonRawData2 = jsonRawDynamicData;
           for (var key in jsonRawData2.keys) {
-            final node = navigateNode(astNode, key);
-            var typeDef = TypeDefinition.fromDynamic(jsonRawData2[key], node);
+            var typeDef = TypeDefinition.fromDynamic(jsonRawData2[key]);
             if (typeDef.name == 'Class') {
               typeDef.name = camelCase(key);
             }
@@ -159,14 +144,12 @@ class ModelGenerator {
             } else {
               toAnalyze = jsonRawData[dependency.name][0];
             }
-            final node = navigateNode(astNode, dependency.name);
-            warns = _generateClassDefinition(dependency.className, toAnalyze,
-                '$path/${dependency.name}', node);
+            warns = _generateClassDefinition(
+                dependency.className, toAnalyze, '$path/${dependency.name}');
           }
         } else {
-          final node = navigateNode(astNode, dependency.name);
           warns = _generateClassDefinition(dependency.className,
-              jsonRawData[dependency.name], '$path/${dependency.name}', node);
+              jsonRawData[dependency.name], '$path/${dependency.name}');
         }
         warnings.addAll(warns);
       }
@@ -176,11 +159,8 @@ class ModelGenerator {
 
   DartCode generateUnsafeDart(String rawJson) {
     final jsonRawData = decodeJSON(rawJson);
-    final astNode = parse(rawJson, Settings());
     List<Warning> warnings =
-        _generateClassDefinition(_rootClassName, jsonRawData, "", astNode);
-    // After generating all classes, replace omitted similar classes
-    // and resolve renamed classes
+        _generateClassDefinition(_rootClassName, jsonRawData, "");
     for (var c in allClasses) {
       final fieldsKeys = c.fields.keys;
       for (var f in fieldsKeys) {

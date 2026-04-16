@@ -1,9 +1,6 @@
 import 'dart:convert' as convert;
-import 'dart:math';
 
 import 'syntax.dart';
-import 'package:json_ast/json_ast.dart'
-    show Node, ObjectNode, ArrayNode, LiteralNode, PropertyNode;
 
 Map<String, bool> PRIMITIVE_TYPES = {
   'int': true,
@@ -216,71 +213,4 @@ String getTypeName(dynamic obj) {
   } else {
     return 'Class';
   }
-}
-
-Node? navigateNode(Node? astNode, String path) {
-  Node? node;
-  if (astNode is ObjectNode) {
-    final ObjectNode objectNode = astNode;
-    PropertyNode? propertyNode;
-    for (int i = 0; i < objectNode.children.length; i++) {
-      final prop = objectNode.children[i];
-      if (prop.key != null && prop.key?.value == path) {
-        propertyNode = prop;
-        break;
-      }
-    }
-    if (propertyNode != null) {
-      node = propertyNode.value;
-    }
-  }
-  if (astNode is ArrayNode) {
-    final ArrayNode arrayNode = astNode;
-    final index = int.tryParse(path);
-    if (index != null && arrayNode.children.length > index) {
-      node = arrayNode.children[index];
-    }
-  }
-  return node;
-}
-
-final _pattern = RegExp(r"""
-([0-9]+)\.{0,1}([0-9]*)e(([-0-9]+))""");
-
-bool isASTLiteralDouble(Node? astNode) {
-  if (astNode != null && astNode is LiteralNode) {
-    final LiteralNode literalNode = astNode;
-    if (literalNode.raw != null) {
-      final containsPoint = literalNode.raw!.contains('.');
-      final containsExponent = literalNode.raw!.contains('e');
-      if (containsPoint || containsExponent) {
-        var isDouble = containsPoint;
-        if (containsExponent) {
-          final matches = _pattern.firstMatch(literalNode.raw!);
-          if (matches != null) {
-            final integer = matches[1]!;
-            final comma = matches[2]!;
-            final exponent = matches[3]!;
-            isDouble = _isDoubleWithExponential(integer, comma, exponent);
-          }
-        }
-        return isDouble;
-      }
-    }
-  }
-  return false;
-}
-
-bool _isDoubleWithExponential(String integer, String comma, String exponent) {
-  final integerNumber = int.tryParse(integer) ?? 0;
-  final exponentNumber = int.tryParse(exponent) ?? 0;
-  final commaNumber = int.tryParse(comma) ?? 0;
-  if (exponentNumber == 0) {
-    return commaNumber > 0;
-  }
-  if (exponentNumber > 0) {
-    return exponentNumber < comma.length && commaNumber > 0;
-  }
-  return commaNumber > 0 ||
-      ((integerNumber.toDouble() * pow(10, exponentNumber)).remainder(1) > 0);
 }
