@@ -6,7 +6,14 @@ example/windows/
 example/web/
 example/lib/actions/
 example/lib/features/
+
+# Per-project config that may contain API tokens
+example/.api2dart/
 example/.apigen/
+.api2dart/
+.api2dart_temp_*
+
+# Legacy paths (pre-rename) — keep ignored to avoid shipping stale data
 .apigen/
 .apigen_debug_export.json
 .apigen_temp_*
