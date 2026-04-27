@@ -1,17 +1,19 @@
-# API Request Generator
+# API to Dart
 
-A Dart CLI tool that generates type-safe API request actions and response models from **Postman**, **OpenAPI**, **Apidog**, or **YAML** configs. Features an interactive terminal UI for selecting endpoints.
+A Dart CLI tool that converts any API (**Postman**, **OpenAPI**, **Apidog**, or **YAML**) into type-safe Dart code — request actions, response models, or just response models when you don't need actions. Features an interactive terminal UI for selecting endpoints.
 
 ## Features
 
 - **Multi-source support** — Postman collections, OpenAPI 3.x specs, Apidog projects, local YAML files
-- **Apidog integration** — Fetches projects, environments, and variables directly from the Apidog API
-- **Interactive endpoint selector** — Tree view with folder navigation, search, and batch selection
-- **Smart response resolution** — Live fetch from server, with fallback to examples and schemas
-- **Request logging** — Detailed `.log` files for every HTTP request with full headers, body, timing
-- **Dart model generation** — Generates `fromJson`/`toJson` models from actual API responses
-- **Environment variables** — Auto-resolves `{{variables}}` from Apidog environments
-- **Settings persistence** — Saves project/environment config per-project in `.apigen/`
+- **Postman integration** — Browse workspaces, environments, and collections from the Postman API
+- **Apidog integration** — Fetches projects, environments, and variables from the Apidog API
+- **Interactive endpoint selector** — Tree view with folder navigation and batch selection
+- **Smart response resolution** — Live fetch → example → schema → empty fallback
+- **Two output modes** — Action + Response (when `api_request` is in your pubspec) or Response-only
+- **Auto-detection** — Picks the right output mode based on your `pubspec.yaml`
+- **Request logging** — `.log` file for every HTTP request with full headers, body, timing
+- **Environment variables** — Auto-resolves `{{variables}}` from Postman/Apidog environments
+- **Settings persistence** — Saves project/environment config per-project in `.api2dart/`
 
 ## Installation
 
@@ -19,9 +21,9 @@ Add as a dev dependency in your Flutter/Dart project:
 
 ```yaml
 dev_dependencies:
-  api_request_generator:
+  api_to_dart:
     git:
-      url: https://github.com/abdo-ahmed-it/api_request_generator.git
+      url: https://github.com/abdo-ahmed-it/api_to_dart.git
 ```
 
 Then run:
@@ -35,18 +37,34 @@ dart pub get
 ### Interactive mode (recommended)
 
 ```bash
-dart run api_request_generator generate
+dart run api_to_dart generate
 ```
 
 This launches the wizard:
 
 1. **Select source** — Local file, Postman API, or Apidog API
 2. **Select endpoints** — Interactive tree with keyboard navigation
-3. **Generate** — Actions and models are created in `lib/actions/`
+3. **Generate** — Files are written to `lib/actions/` (or `lib/models/` in response-only mode)
+
+### With Postman
+
+```
+? Select source: Postman (fetch from API)
+? Postman API Key: PMAK-xxxxx
+  Loading workspaces...
+? Select workspace: My Team (team)
+  Loading environments...
+? Select environment: Production
+  ✓ Environment: Production (8 variables)
+  Loading collections...
+? Select collection: My API
+  ✓ Loaded 42 endpoints
+? Select endpoints: ...
+  ✓ Generated 5 files
+```
 
 ### With Apidog
 
-First time:
 ```
 ? Select source: Apidog (fetch from API)
 ? Apidog API Token: adgp_xxxxx
@@ -59,29 +77,48 @@ First time:
   ✓ Generated 5 files
 ```
 
-Next time — goes straight to endpoint selection (settings saved in `.apigen/config.yaml`).
+Next time — goes straight to endpoint selection (settings saved in `.api2dart/config.yaml`).
 
-### With flags (CI/scripting)
+### With flags (CI / scripting)
 
 ```bash
 # Generate all endpoints from a Postman collection
-dart run api_request_generator generate \
+dart run api_to_dart generate \
   -s postman \
   -c postman_collection.json \
   -b https://api.example.com \
   --no-interactive
 
+# Force response-only mode (no api_request import)
+dart run api_to_dart generate \
+  -s openapi \
+  -c openapi.yaml \
+  -m response-only \
+  --no-interactive
+
 # Dry run — preview without writing files
-dart run api_request_generator generate \
+dart run api_to_dart generate \
   -s postman \
   -c collection.json \
   --dry-run --no-interactive
+```
 
-# Reset saved settings
-dart run api_request_generator generate --reset
+### Reset saved settings
+
+```bash
+# Clear wizard selections (keep saved API tokens)
+dart run api_to_dart reset
+
+# Clear everything, including saved Postman/Apidog tokens
+dart run api_to_dart reset --all
+
+# Skip the confirmation prompt
+dart run api_to_dart reset -y
 ```
 
 ### Flags
+
+#### `generate`
 
 | Flag | Short | Description |
 |------|-------|-------------|
@@ -89,10 +126,17 @@ dart run api_request_generator generate --reset
 | `--config` | `-c` | Path to collection/spec file |
 | `--output` | `-o` | Output directory (default: `lib/actions`) |
 | `--base-url` | `-b` | Base URL for live fetch |
-| `--token` | `-t` | Authentication token |
+| `--token` | `-t` | Authentication token for live fetch |
+| `--mode` | `-m` | `auto` (default), `action`, or `response-only` |
 | `--no-interactive` | | Skip selector, generate all |
 | `--dry-run` | | Preview only |
-| `--reset` | | Clear saved settings |
+
+#### `reset`
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--all` | | Also delete saved Postman / Apidog tokens |
+| `--yes` | `-y` | Skip the confirmation prompt |
 
 ## Keyboard Controls
 
@@ -107,11 +151,14 @@ dart run api_request_generator generate --reset
 | `Enter` | Generate selected |
 | `q` | Quit |
 
-## Generated Output
+## Output Modes
 
-For each selected endpoint, the tool generates:
+### Action + Response (default when `api_request` is detected)
 
-**Action file** (`lib/actions/login_action.dart`):
+Each endpoint becomes a file with both an `ApiRequestAction` subclass and its response model.
+
+`lib/actions/login_action.dart`:
+
 ```dart
 import 'package:api_request/api_request.dart';
 
@@ -144,7 +191,41 @@ class LoginResponse {
 }
 ```
 
-**Log file** (`lib/actions/logs/login_action.log`):
+### Response-only (default when `api_request` is missing)
+
+For projects that don't use the `api_request` package. Only the model is generated, with no `api_request` import.
+
+`lib/models/login_response.dart`:
+
+```dart
+class LoginResponse {
+  bool? status;
+  String? message;
+  Data? data;
+
+  LoginResponse({this.status, this.message, this.data});
+
+  LoginResponse.fromJson(Map<String, dynamic> json) { ... }
+  Map<String, dynamic> toJson() { ... }
+}
+```
+
+In response-only mode, endpoints with no response data are skipped (there's nothing useful to emit).
+
+### Picking the mode explicitly
+
+The CLI auto-detects from your `pubspec.yaml`. You can override with `-m`:
+
+- `-m auto` — auto-detect (default)
+- `-m action` — force action + response
+- `-m response-only` — force response-only
+
+## Request log
+
+For every endpoint, a `.log` file is written next to the output:
+
+`lib/actions/logs/login_action.log`:
+
 ```
 =[ requestName ]===================
 "Login"
@@ -159,31 +240,32 @@ class LoginResponse {
 { "status": true, "message": "Success", "data": { ... } }
 ```
 
+Failed requests (non-2xx) create only the log file — no Dart code is generated.
+
 ## Response Resolution
 
-The tool resolves responses using this priority:
+The tool resolves each endpoint's response using this priority:
 
 1. **Live fetch** — Sends the actual request to the server (best quality models)
-2. **Example** — Uses the example from the OpenAPI spec
+2. **Example** — Uses the example from the OpenAPI spec or Postman saved response
 3. **Schema** — Generates synthetic JSON from the OpenAPI schema
-4. **Action-only** — Generates the action with `dynamic` response type
-
-Failed requests (non-2xx) create only a log file — no action is generated.
+4. **Empty** — Falls back to `dynamic` response type (action mode) or skips the file (response-only)
 
 ## Project Structure
 
 ```
 lib/
   src/
-    core/              # Reusable logic (for future VS Code extension)
+    core/              # Reusable logic (pure Dart, no CLI dependencies)
       models/          # ApiEndpoint, EndpointTree, BodyDefinition, etc.
       sources/         # PostmanSource, OpenApiSource, ApidogSource, LocalFileSource
-      generation/      # ActionGenerator, ResponseGenerator, CodeEmitter
+        api_fetchers/  # PostmanFetcher, ApidogFetcher, ConfigStorage
+      generation/      # ActionGenerator, ResponseGenerator, CodeEmitter, PubspecInspector
       resolution/      # HttpClient, ResponseResolver
-      json_to_dart/    # JSON to Dart model generator
+      json_to_dart/    # JSON-to-Dart model generator
       logger/          # Abstract Logger + ConsoleLogger
-    cli/               # Terminal UI
-      commands/        # GenerateCommand
+    cli/               # Terminal UI (CLI-only)
+      commands/        # GenerateCommand, ResetCommand
       wizard/          # Interactive wizard
       ui/              # EndpointSelector, FileBrowser, Prompts
 ```
@@ -191,8 +273,9 @@ lib/
 ## Requirements
 
 - Dart SDK >= 3.6.2
+- For Postman integration: API key from [Postman API keys](https://postman.co/settings/me/api-keys)
 - For Apidog integration: API Access Token from [Apidog Settings](https://app.apidog.com/settings/api-access-token)
-- Generated code requires the [api_request](https://pub.dev/packages/api_request) package
+- Action mode requires the [`api_request`](https://pub.dev/packages/api_request) package in your pubspec; response-only mode has no runtime dependencies
 
 ## License
 
