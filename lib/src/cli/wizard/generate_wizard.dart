@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../core/generation/code_emitter.dart';
+import '../../core/generation/pubspec_inspector.dart';
 import '../../core/logger/console_logger.dart';
 import '../../core/logger/logger.dart';
 import '../../core/models/api_endpoint.dart';
@@ -22,26 +23,17 @@ import '../ui/terminal_utils.dart';
 
 class GenerateWizard {
   final Logger _logger;
-  final bool reset;
 
-  GenerateWizard({Logger? logger, this.reset = false})
-      : _logger = logger ?? ConsoleLogger();
+  GenerateWizard({Logger? logger}) : _logger = logger ?? ConsoleLogger();
 
   Future<void> run() async {
     _printBanner();
-
-    // If reset, clear saved settings
-    if (reset) {
-      ConfigStorage.remove('wizard');
-      _logger.i('Settings reset. Starting fresh.');
-      stdout.writeln('');
-    }
 
     // Check for saved settings
     final savedSource = ConfigStorage.get('wizard.source');
     _LoadResult? loadResult;
 
-    if (savedSource != null && !reset) {
+    if (savedSource != null) {
       // Try to load from saved settings
       loadResult = await _loadFromSavedSettings(savedSource);
 
@@ -125,7 +117,7 @@ class GenerateWizard {
     stdout.writeln(TerminalUtils.bold(
         '┌─────────────────────────────────────┐'));
     stdout.writeln(TerminalUtils.bold(
-        '│   🚀 API Request Generator           │'));
+        '│   🚀 API to Dart                     │'));
     stdout.writeln(TerminalUtils.bold(
         '└─────────────────────────────────────┘'));
     stdout.writeln('');
@@ -145,8 +137,26 @@ class GenerateWizard {
         final apiKey = ConfigStorage.get('postman.api_key');
         final collectionUid = ConfigStorage.get('wizard.postman_collection_uid');
         if (apiKey == null || collectionUid == null) return null;
-        _logger.i('Using saved settings: Postman API');
-        return _fetchPostmanCollection(apiKey, collectionUid);
+
+        // Refresh environment variables if one was previously selected.
+        final envUid = ConfigStorage.get('wizard.postman_environment_uid');
+        final envName = ConfigStorage.get('wizard.postman_environment_name');
+        Map<String, String>? envVars;
+        if (envUid != null && envUid.isNotEmpty) {
+          _logger.i(
+              'Using saved settings: Postman API (Env: ${envName ?? envUid})');
+          final fetcher = PostmanFetcher(apiKey: apiKey, logger: _logger);
+          final env = await fetcher.getEnvironment(envUid);
+          if (env != null) {
+            envVars = env.variables;
+            _logger.i('✓ Loaded ${envVars.length} environment variables');
+          }
+        } else {
+          _logger.i('Using saved settings: Postman API');
+        }
+
+        return _fetchPostmanCollection(apiKey, collectionUid,
+            environmentVars: envVars);
 
       case 'apidog_api':
         final token = ConfigStorage.get('apidog.token');
@@ -306,8 +316,10 @@ class GenerateWizard {
     final workspaces = await fetcher.getWorkspaces();
 
     if (workspaces.isEmpty) {
-      _logger.e('No workspaces found. Check your API key.');
-      ConfigStorage.set('postman.api_key', '');
+      _logger.e(
+          'No workspaces found. The saved Postman API key may be invalid '
+          'or expired.\n'
+          '  Run `api2dart reset --all` to clear it and try a new one.');
       return null;
     }
 
@@ -316,10 +328,39 @@ class GenerateWizard {
       options: workspaces.map((w) => '${w.name} (${w.type})').toList(),
     );
     if (wsIndex == -1) return null;
+    final workspaceId = workspaces[wsIndex].id;
+
+    // Environment selection (optional)
+    _logger.i('Loading environments...');
+    final environments = await fetcher.getEnvironments(workspaceId: workspaceId);
+    PostmanEnvironment? selectedEnv;
+
+    if (environments.isEmpty) {
+      _logger.i('No environments in this workspace — skipping.');
+    } else {
+      final options = ['(no environment)', ...environments.map((e) => e.name)];
+      final envIndex = promptSelect(
+        message: 'Select environment',
+        options: options,
+      );
+      if (envIndex == -1) return null;
+
+      if (envIndex > 0) {
+        final envInfo = environments[envIndex - 1];
+        _logger.i('Loading environment "${envInfo.name}"...');
+        selectedEnv = await fetcher.getEnvironment(envInfo.uid);
+        if (selectedEnv != null) {
+          _logger.i(
+              '✓ Environment: ${selectedEnv.name} (${selectedEnv.variables.length} variables)');
+        } else {
+          _logger.w('Failed to load environment, continuing without it.');
+        }
+      }
+    }
 
     _logger.i('Loading collections...');
     final collections =
-        await fetcher.getCollections(workspaceId: workspaces[wsIndex].id);
+        await fetcher.getCollections(workspaceId: workspaceId);
 
     if (collections.isEmpty) {
       _logger.e('No collections found in this workspace');
@@ -332,20 +373,35 @@ class GenerateWizard {
     );
     if (colIndex == -1) return null;
 
-    final result =
-        await _fetchPostmanCollection(apiKey, collections[colIndex].uid);
+    final result = await _fetchPostmanCollection(
+      apiKey,
+      collections[colIndex].uid,
+      environmentVars: selectedEnv?.variables,
+    );
 
     if (result != null) {
       // Save settings
       ConfigStorage.set('wizard.source', 'postman_api');
       ConfigStorage.set(
           'wizard.postman_collection_uid', collections[colIndex].uid);
+      if (selectedEnv != null) {
+        ConfigStorage.set(
+            'wizard.postman_environment_uid', selectedEnv.uid);
+        ConfigStorage.set(
+            'wizard.postman_environment_name', selectedEnv.name);
+      } else {
+        ConfigStorage.remove('wizard.postman_environment_uid');
+        ConfigStorage.remove('wizard.postman_environment_name');
+      }
     }
     return result;
   }
 
   Future<_LoadResult?> _fetchPostmanCollection(
-      String apiKey, String collectionUid) async {
+    String apiKey,
+    String collectionUid, {
+    Map<String, String>? environmentVars,
+  }) async {
     final fetcher = PostmanFetcher(apiKey: apiKey, logger: _logger);
 
     _logger.i('Loading collection...');
@@ -356,7 +412,7 @@ class GenerateWizard {
       return null;
     }
 
-    final tempFile = File('.apigen_temp_collection.json');
+    final tempFile = File('.api2dart_temp_collection.json');
     tempFile.writeAsStringSync(collectionJson);
 
     try {
@@ -365,17 +421,32 @@ class GenerateWizard {
           await source.parse(ApiSourceConfig(filePath: tempFile.path));
 
       final content = jsonDecode(collectionJson);
-      final vars = _extractPostmanVariables(content);
+      // Merge: collection variables first, environment variables override.
+      final vars = <String, String?>{
+        ..._extractPostmanVariables(content),
+        if (environmentVars != null) ...environmentVars,
+      };
 
       _logger.i('✓ ${tree.sourceName}: ${tree.totalEndpoints} endpoints');
-      if (vars['base_url'] != null) {
-        _logger.i('✓ Base URL: ${vars['base_url']}');
+
+      // Pick base URL from common variable names.
+      final baseUrl = vars['base_url'] ??
+          vars['baseUrl'] ??
+          vars['url'] ??
+          vars['host'];
+      if (baseUrl != null && baseUrl.isNotEmpty) {
+        _logger.i('✓ Base URL: $baseUrl');
       }
+
+      final token = vars['token'] ??
+          vars['access_token'] ??
+          vars['accessToken'] ??
+          vars['auth_token'];
 
       return _LoadResult(
         tree: tree,
-        baseUrl: vars['base_url'],
-        token: vars['token'],
+        baseUrl: baseUrl,
+        token: token,
       );
     } finally {
       if (tempFile.existsSync()) tempFile.deleteSync();
@@ -408,8 +479,9 @@ class GenerateWizard {
     final projects = await fetcher.getProjects();
 
     if (projects.isEmpty) {
-      _logger.e('No projects found. Check your token.');
-      ConfigStorage.set('apidog.token', '');
+      _logger.e('No projects found. The saved Apidog token may be invalid '
+          'or expired.\n'
+          '  Run `api2dart reset --all` to clear it and try a new one.');
       return null;
     }
 
@@ -500,7 +572,7 @@ class GenerateWizard {
       }
     }
 
-    final tempFile = File('.apigen_temp_openapi.json');
+    final tempFile = File('.api2dart_temp_openapi.json');
     tempFile.writeAsStringSync(resolvedJson);
 
     try {
@@ -618,7 +690,16 @@ class GenerateWizard {
     String? token,
     Map<String, String> urlVariables = const {},
   }) async {
-    const outputDir = 'lib/actions';
+    final generateAction = PubspecInspector.hasApiRequestDependency();
+    final outputDir = generateAction ? 'lib/actions' : 'lib/models';
+    if (generateAction) {
+      _logger.i('Detected `api_request` package → '
+          'generating actions + responses in $outputDir');
+    } else {
+      _logger.i('No `api_request` package detected → '
+          'generating response-only models in $outputDir');
+    }
+
     final httpClient = ApiHttpClient(logger: _logger);
     final resolver = ResponseResolver(httpClient: httpClient);
     final emitter = CodeEmitter(logger: _logger);
@@ -682,6 +763,7 @@ class GenerateWizard {
     final generated = emitter.emitBatch(
       endpointResponses: endpointResponses,
       outputDir: outputDir,
+      generateAction: generateAction,
     );
 
     final failed = endpoints.length - generated;

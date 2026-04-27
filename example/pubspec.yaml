@@ -37,7 +37,7 @@ dependencies:
   api_request: ^1.0.9
 
 dev_dependencies:
-  api_request_generator:
+  api_to_dart:
     path: ../
   flutter_test:
     sdk: flutter

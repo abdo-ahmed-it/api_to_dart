@@ -1,4 +1,4 @@
-import 'package:api_request_generator/api_request_generator.dart';
+import 'package:api_to_dart/api_to_dart.dart';
 import 'package:test/test.dart';
 
 void main() {

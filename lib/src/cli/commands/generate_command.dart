@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:args/command_runner.dart';
 
 import '../../core/generation/code_emitter.dart';
+import '../../core/generation/pubspec_inspector.dart';
 import '../../core/logger/console_logger.dart';
 import '../../core/logger/logger.dart';
 import '../../core/models/api_endpoint.dart';
@@ -22,49 +23,83 @@ import '../wizard/generate_wizard.dart';
 class GenerateCommand extends Command {
   GenerateCommand() {
     argParser
+      ..addSeparator('Source options:')
       ..addOption('source',
           abbr: 's',
-          help: 'Source type',
-          allowed: ['postman', 'openapi', 'apidog', 'file'])
+          help: 'Source type. Required when --config is provided.',
+          allowed: ['postman', 'openapi', 'apidog', 'file'],
+          allowedHelp: {
+            'postman': 'Postman collection v2.1 (.json)',
+            'openapi': 'OpenAPI 3.x spec (.yaml or .json)',
+            'apidog': 'Apidog export (OpenAPI-compatible)',
+            'file': 'Single-endpoint YAML config',
+          })
       ..addOption('config',
-          abbr: 'c', help: 'Path to the config/collection file')
+          abbr: 'c',
+          help: 'Path to the collection/spec file.\n'
+              'Omit to launch the interactive wizard instead.')
       ..addOption('output',
           abbr: 'o',
-          help: 'Output directory',
+          help: 'Output directory for generated actions/models',
           defaultsTo: 'lib/actions')
+      ..addSeparator('Live fetch options (used to fetch real responses):')
       ..addOption('base-url',
-          abbr: 'b', help: 'Base URL for the API')
+          abbr: 'b',
+          help: 'Base URL of the API\n(e.g. https://api.example.com)')
       ..addOption('token',
-          abbr: 't', help: 'Authentication token')
+          abbr: 't',
+          help: 'Auth token used when fetching live responses')
+      ..addSeparator('Output mode:')
+      ..addOption('mode',
+          abbr: 'm',
+          help: 'What to generate per endpoint.',
+          allowed: ['auto', 'action', 'response-only'],
+          allowedHelp: {
+            'auto':
+                'Detect: action+response if `api_request` is in pubspec, else response-only',
+            'action': 'Force ApiRequestAction subclass + response model',
+            'response-only': 'Only the response model (no api_request import)',
+          },
+          defaultsTo: 'auto')
+      ..addSeparator('Behavior flags:')
       ..addFlag('no-interactive',
-          help: 'Skip interactive selector, generate all endpoints',
+          help: 'Skip the endpoint selector and generate every endpoint.\n'
+              'Required for CI / non-TTY environments.',
           negatable: false,
           defaultsTo: false)
       ..addFlag('dry-run',
-          help: 'Show what would be generated without writing files',
-          negatable: false,
-          defaultsTo: false)
-      ..addFlag('reset',
-          help: 'Reset saved settings and start fresh',
+          help: 'Print what would be generated without writing any files',
           negatable: false,
           defaultsTo: false);
   }
 
   @override
   String get description =>
-      'Generate API request actions from a collection or spec';
+      'Generate Dart actions and response models from an API source.\n\n'
+      'Two modes:\n'
+      '  • Wizard (no --config): interactive prompts for source, project, '
+      'and endpoints — settings are saved per-project in .api2dart/config.yaml.\n'
+      '  • Flags (--config): non-interactive, suitable for scripts and CI.\n\n'
+      'Examples:\n'
+      '  api2dart generate                                 # launch the wizard\n'
+      '  api2dart reset                                    # clear saved wizard selections\n'
+      '  api2dart generate -s postman -c collection.json -b https://api.example.com\n'
+      '  api2dart generate -s openapi -c openapi.yaml --no-interactive\n'
+      '  api2dart generate -s postman -c collection.json --dry-run --no-interactive';
 
   @override
   String get name => 'generate';
 
   @override
+  String get invocation => 'api2dart generate [arguments]';
+
+  @override
   void run() async {
     final configPath = argResults!['config'] as String?;
-    final resetFlag = argResults!['reset'] as bool;
 
     // If no config provided, launch interactive wizard
     if (configPath == null || configPath.isEmpty) {
-      final wizard = GenerateWizard(reset: resetFlag);
+      final wizard = GenerateWizard();
       await wizard.run();
       return;
     }
@@ -82,6 +117,8 @@ class GenerateCommand extends Command {
     final token = argResults!['token'] as String?;
     final noInteractive = argResults!['no-interactive'] as bool;
     final dryRun = argResults!['dry-run'] as bool;
+    final modeArg = argResults!['mode'] as String;
+    final generateAction = _resolveGenerateAction(modeArg, logger);
 
     // 1. Select source
     final ApiSource source;
@@ -146,8 +183,11 @@ class GenerateCommand extends Command {
     if (dryRun) {
       logger.i('Dry run — would generate ${selectedEndpoints.length} files:');
       for (final endpoint in selectedEndpoints) {
+        final fileName = generateAction
+            ? endpoint.fileName
+            : endpoint.fileName.replaceAll('_action.dart', '_response.dart');
         logger.n(
-            '  ${endpoint.method.name.padRight(6)} ${endpoint.path} → $outputDir/${endpoint.fileName}');
+            '  ${endpoint.method.name.padRight(6)} ${endpoint.path} → $outputDir/$fileName');
       }
       exit(0);
     }
@@ -196,10 +236,32 @@ class GenerateCommand extends Command {
     final generated = emitter.emitBatch(
       endpointResponses: endpointResponses,
       outputDir: outputDir,
+      generateAction: generateAction,
     );
 
     final failed = selectedEndpoints.length - generated;
     logger.i(
         'Done! Generated $generated files${failed > 0 ? ', $failed failed' : ''} in $outputDir');
+  }
+
+  /// Resolves the requested mode to the boolean the emitter expects.
+  /// Logs the detected outcome for `auto`.
+  bool _resolveGenerateAction(String mode, Logger logger) {
+    switch (mode) {
+      case 'action':
+        return true;
+      case 'response-only':
+        return false;
+      case 'auto':
+      default:
+        final hasPkg = PubspecInspector.hasApiRequestDependency();
+        if (hasPkg) {
+          logger.i('Detected `api_request` in pubspec — '
+              'generating action + response.');
+        } else {
+          logger.i('No `api_request` in pubspec — generating response only.');
+        }
+        return hasPkg;
+    }
   }
 }

@@ -25,13 +25,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.9"
-  api_request_generator:
+  api_to_dart:
     dependency: "direct dev"
     description:
       path: ".."
       relative: true
     source: path
-    version: "0.1.0"
+    version: "0.2.0"
   args:
     dependency: transitive
     description:

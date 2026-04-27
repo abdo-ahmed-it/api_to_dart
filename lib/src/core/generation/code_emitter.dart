@@ -21,25 +21,44 @@ class CodeEmitter {
         _responseGenerator = responseGenerator ?? ResponseGenerator(),
         _logger = logger;
 
-  /// Generates and writes action + response code for a single endpoint.
+  /// Generates and writes code for a single endpoint.
+  ///
+  /// When [generateAction] is `true` (default) the file contains an
+  /// `ApiRequestAction` subclass plus its response model.
+  /// When `false` only the response model is generated — useful for projects
+  /// that don't depend on the `api_request` package.
   String? emit({
     required ApiEndpoint endpoint,
     required String outputDir,
     ResponseDefinition? response,
     String? customFileName,
+    bool generateAction = true,
   }) {
     try {
       final name = endpoint.name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+      final responseClassName = '${name}Response';
+      final hasResponse = response != null && response.hasJson;
 
       String fileContent;
-
-      if (response != null && response.hasJson) {
-        final action = _actionGenerator.generate(endpoint);
-        final responseCode =
-            _responseGenerator.generate(response.jsonBody!, '${name}Response');
-        fileContent = '$action\n\n$responseCode\n';
+      if (generateAction) {
+        if (hasResponse) {
+          final action = _actionGenerator.generate(endpoint);
+          final responseCode =
+              _responseGenerator.generate(response.jsonBody!, responseClassName);
+          fileContent = '$action\n\n$responseCode\n';
+        } else {
+          fileContent = _actionGenerator.generateActionOnly(endpoint);
+        }
       } else {
-        fileContent = _actionGenerator.generateActionOnly(endpoint);
+        // Response-only mode: skip files we can't usefully generate.
+        if (!hasResponse) {
+          _logger.w(
+              'Skipped ${endpoint.name}: no response data available '
+              '(response-only mode).');
+          return null;
+        }
+        fileContent =
+            _responseGenerator.generate(response.jsonBody!, responseClassName);
       }
 
       final formatter = DartFormatter(
@@ -47,7 +66,7 @@ class CodeEmitter {
       final formattedCode = formatter.format(fileContent);
 
       Directory(outputDir).createSync(recursive: true);
-      final fileName = customFileName ?? endpoint.fileName;
+      final fileName = customFileName ?? _fileNameFor(endpoint, generateAction);
       final filePath = '$outputDir/$fileName';
       File(filePath).writeAsStringSync(formattedCode);
 
@@ -59,10 +78,11 @@ class CodeEmitter {
     }
   }
 
-  /// Batch generate — each action is self-contained with its own models.
+  /// Batch generate — each endpoint becomes its own self-contained file.
   int emitBatch({
     required Map<ApiEndpoint, ResponseDefinition?> endpointResponses,
     required String outputDir,
+    bool generateAction = true,
   }) {
     int generated = 0;
 
@@ -71,6 +91,7 @@ class CodeEmitter {
         endpoint: entry.key,
         outputDir: outputDir,
         response: entry.value,
+        generateAction: generateAction,
       );
 
       if (filePath != null) {
@@ -85,19 +106,27 @@ class CodeEmitter {
   String? generateCode({
     required ApiEndpoint endpoint,
     ResponseDefinition? response,
+    bool generateAction = true,
   }) {
     try {
       final name = endpoint.name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+      final responseClassName = '${name}Response';
+      final hasResponse = response != null && response.hasJson;
 
       String fileContent;
-
-      if (response != null && response.hasJson) {
-        final action = _actionGenerator.generate(endpoint);
-        final responseCode =
-            _responseGenerator.generate(response.jsonBody!, '${name}Response');
-        fileContent = '$action\n\n$responseCode\n';
+      if (generateAction) {
+        if (hasResponse) {
+          final action = _actionGenerator.generate(endpoint);
+          final responseCode =
+              _responseGenerator.generate(response.jsonBody!, responseClassName);
+          fileContent = '$action\n\n$responseCode\n';
+        } else {
+          fileContent = _actionGenerator.generateActionOnly(endpoint);
+        }
       } else {
-        fileContent = _actionGenerator.generateActionOnly(endpoint);
+        if (!hasResponse) return null;
+        fileContent =
+            _responseGenerator.generate(response.jsonBody!, responseClassName);
       }
 
       final formatter = DartFormatter(
@@ -107,5 +136,12 @@ class CodeEmitter {
       _logger.e('Error generating code for ${endpoint.name}', error: e);
       return null;
     }
+  }
+
+  String _fileNameFor(ApiEndpoint endpoint, bool generateAction) {
+    if (generateAction) return endpoint.fileName;
+    // In response-only mode, "<name>_action.dart" would mislead readers —
+    // emit "<name>_response.dart" instead.
+    return endpoint.fileName.replaceAll('_action.dart', '_response.dart');
   }
 }

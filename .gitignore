@@ -30,7 +30,10 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 build/
 
-# API Request Generator config (contains API keys)
+# API to Dart config (contains API keys)
+.api2dart/
+.api2dart_temp_*
+# Legacy paths (pre-rename) — keep ignored
 .apigen/
 .apigen_debug_export.json
 .apigen_temp_*

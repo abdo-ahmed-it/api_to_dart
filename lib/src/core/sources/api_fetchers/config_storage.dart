@@ -3,10 +3,10 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 
-/// Manages stored API keys and config in .apigen/config.yaml (project root).
+/// Manages stored API keys and config in .api2dart/config.yaml (project root).
 class ConfigStorage {
   static final String _configDir =
-      p.join(Directory.current.path, '.apigen');
+      p.join(Directory.current.path, '.api2dart');
   static final String _configPath = p.join(_configDir, 'config.yaml');
 
   /// Gets a stored value by key path (e.g. 'postman.api_key').
