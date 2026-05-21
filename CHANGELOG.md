@@ -1,3 +1,11 @@
+## 0.3.1
+
+### Changed
+- Running `api2dart` with no arguments now launches the interactive
+  wizard directly instead of printing the usage screen. All other
+  commands and flags (`--help`, `version`, `upgrade`, etc.) behave
+  exactly as before.
+
 ## 0.3.0
 
 ### New
