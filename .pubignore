@@ -17,3 +17,6 @@ example/.apigen/
 .apigen/
 .apigen_debug_export.json
 .apigen_temp_*
+
+# Marketing / personal notes — not part of the package
+linkedin_post.md
