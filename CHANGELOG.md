@@ -1,3 +1,20 @@
+## 0.3.0
+
+### New
+- `version` subcommand — prints the installed version.
+- `upgrade` subcommand — pulls the latest release from pub.dev.
+- Automatic update notice after any command when a newer version
+  is available on pub.dev.
+
+### Changed
+- Request logs are now Markdown (`.md`) instead of plain `.log`, with
+  formatted sections for URL, headers, request body, status code, and
+  response body.
+- Generated files are written under a dated subfolder
+  (`<output>/<YYYY-MM-DD>/actions/` and `.../logs/`) so repeated runs
+  don't overwrite previous outputs. The default `--output` is now
+  `api2dart` (was `lib/actions`).
+
 ## 0.2.0
 
 **Renamed package** from `api_request_generator` to `api_to_dart`. The
