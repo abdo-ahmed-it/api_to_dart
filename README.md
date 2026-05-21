@@ -116,6 +116,23 @@ dart run api_to_dart reset --all
 dart run api_to_dart reset -y
 ```
 
+### Version & upgrade
+
+```bash
+# Show the installed version (also: --version, -v)
+api2dart version
+
+# Upgrade to the latest version on pub.dev
+api2dart upgrade
+```
+
+You'll automatically see a notice after any command when a new version is available:
+
+```
+✦ Update available: 0.2.0 → 0.3.0
+  Run `api2dart upgrade` to install the new version.
+```
+
 ### Flags
 
 #### `generate`
@@ -137,6 +154,12 @@ dart run api_to_dart reset -y
 |------|-------|-------------|
 | `--all` | | Also delete saved Postman / Apidog tokens |
 | `--yes` | `-y` | Skip the confirmation prompt |
+
+#### `upgrade`
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--force` | `-f` | Re-activate even if already on the latest version |
 
 ## Keyboard Controls
 
@@ -265,7 +288,7 @@ lib/
       json_to_dart/    # JSON-to-Dart model generator
       logger/          # Abstract Logger + ConsoleLogger
     cli/               # Terminal UI (CLI-only)
-      commands/        # GenerateCommand, ResetCommand
+      commands/        # GenerateCommand, ResetCommand, VersionCommand, UpgradeCommand
       wizard/          # Interactive wizard
       ui/              # EndpointSelector, FileBrowser, Prompts
 ```

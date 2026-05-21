@@ -671,6 +671,13 @@ class GenerateWizard {
     return defaultBaseUrl;
   }
 
+  /// Date folder name (YYYY-MM-DD) used to group each run's output.
+  String _todayFolder() {
+    final now = DateTime.now();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${now.year}-${two(now.month)}-${two(now.day)}';
+  }
+
   /// Gets the clean path for an endpoint, removing URL variable prefixes.
   String _resolveEndpointPath(ApiEndpoint endpoint, Map<String, String> urlVars) {
     if (urlVars.isEmpty) return endpoint.path;
@@ -691,7 +698,10 @@ class GenerateWizard {
     Map<String, String> urlVariables = const {},
   }) async {
     final generateAction = PubspecInspector.hasApiRequestDependency();
-    final outputDir = generateAction ? 'lib/actions' : 'lib/models';
+    final rootOutputDir = 'api2dart';
+    final dateFolder = _todayFolder();
+    final outputDir = '$rootOutputDir/$dateFolder/actions';
+    final logsDir = '$rootOutputDir/$dateFolder/logs';
     if (generateAction) {
       _logger.i('Detected `api_request` package → '
           'generating actions + responses in $outputDir');
@@ -740,18 +750,19 @@ class GenerateWizard {
         result = ResolveResult(response: ResponseDefinition.empty);
       }
 
-      // Write log file for every request
+      // Write log file for every request (flat — no subfolders)
       final logFileName = cleanEndpoint.fileName.replaceAll('.dart', '');
       if (result.log != null) {
-        result.log!.writeToFile(outputDir, logFileName);
+        result.log!.writeToFile(logsDir, logFileName);
       }
 
       // Check if request failed (has log with non-success status)
       if (result.log != null &&
           result.log!.statusCode != null &&
           (result.log!.statusCode! < 200 || result.log!.statusCode! >= 300)) {
-        final logPath = '${Directory.current.path}/$outputDir/logs/$logFileName.log';
-        final link = TerminalUtils.fileLink(logPath, label: 'logs/$logFileName.log');
+        final logPath = '${Directory.current.path}/$logsDir/$logFileName.md';
+        final link = TerminalUtils.fileLink(logPath,
+            label: '$logsDir/$logFileName.md');
         _logger.e(
             '✗ ${cleanEndpoint.name} (${result.log!.statusCode}) → $link');
         continue; // Skip generating action for failed requests

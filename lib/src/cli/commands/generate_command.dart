@@ -40,8 +40,9 @@ class GenerateCommand extends Command {
               'Omit to launch the interactive wizard instead.')
       ..addOption('output',
           abbr: 'o',
-          help: 'Output directory for generated actions/models',
-          defaultsTo: 'lib/actions')
+          help: 'Root output directory. A dated subfolder is created inside\n'
+              'it containing actions/ and logs/ subfolders.',
+          defaultsTo: 'api2dart')
       ..addSeparator('Live fetch options (used to fetch real responses):')
       ..addOption('base-url',
           abbr: 'b',
@@ -112,7 +113,10 @@ class GenerateCommand extends Command {
     final Logger logger = ConsoleLogger();
     final sourceType = argResults!['source'] as String? ?? 'postman';
     final configPath = argResults!['config'] as String;
-    final outputDir = argResults!['output'] as String;
+    final rootOutputDir = argResults!['output'] as String;
+    final dateFolder = _todayFolder();
+    final outputDir = '$rootOutputDir/$dateFolder/actions';
+    final logsDir = '$rootOutputDir/$dateFolder/logs';
     final baseUrl = argResults!['base-url'] as String?;
     final token = argResults!['token'] as String?;
     final noInteractive = argResults!['no-interactive'] as bool;
@@ -217,13 +221,13 @@ class GenerateCommand extends Command {
 
       final logFileName = endpoint.fileName.replaceAll('.dart', '');
       if (result.log != null) {
-        result.log!.writeToFile(outputDir, logFileName);
+        result.log!.writeToFile(logsDir, logFileName);
       }
 
       if (result.log != null &&
           result.log!.statusCode != null &&
           (result.log!.statusCode! < 200 || result.log!.statusCode! >= 300)) {
-        final logPath = '${Directory.current.path}/$outputDir/logs/$logFileName.log';
+        final logPath = '${Directory.current.path}/$logsDir/$logFileName.md';
         // Use full path — most terminals make it clickable
         logger.e(
             '✗ ${endpoint.name} (${result.log!.statusCode}) → $logPath');
@@ -242,6 +246,13 @@ class GenerateCommand extends Command {
     final failed = selectedEndpoints.length - generated;
     logger.i(
         'Done! Generated $generated files${failed > 0 ? ', $failed failed' : ''} in $outputDir');
+  }
+
+  /// Date folder name (YYYY-MM-DD) used to group each run's output.
+  String _todayFolder() {
+    final now = DateTime.now();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${now.year}-${two(now.month)}-${two(now.day)}';
   }
 
   /// Resolves the requested mode to the boolean the emitter expects.
