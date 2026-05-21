@@ -29,15 +29,20 @@ class CliApp {
   }
 
   Future<void> run(List<String> arguments) async {
+    // When invoked with no arguments, launch the interactive wizard directly
+    // instead of printing usage — this is the most common entry point and
+    // matches what `api2dart generate` does.
+    final effectiveArgs = arguments.isEmpty ? const ['generate'] : arguments;
+
     // Kick off a background update check (uses daily cache). We don't await
     // it here so the command isn't blocked by a slow network — we just
     // surface the result at the end if a newer version is known.
-    final updateFuture = _shouldCheckUpdates(arguments)
+    final updateFuture = _shouldCheckUpdates(effectiveArgs)
         ? UpdateChecker.fetchLatestVersion()
         : Future<String?>.value(null);
 
     try {
-      await _runner.run(arguments);
+      await _runner.run(effectiveArgs);
     } catch (e) {
       final logger = ConsoleLogger();
       logger.e('Error: $e');
