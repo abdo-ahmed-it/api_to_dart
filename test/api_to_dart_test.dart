@@ -166,6 +166,80 @@ void main() {
     });
   });
 
+  group('Enum generation (OpenAPI schema)', () {
+    final generator = ResponseGenerator();
+
+    test('string field with enum becomes a Dart enum with unknown fallback',
+        () {
+      const json = '{"status": "string"}';
+      final schema = {
+        'type': 'object',
+        'properties': {
+          'status': {
+            'type': 'string',
+            'enum': ['active', 'banned'],
+          },
+        },
+      };
+
+      final code = generator.generate(json, 'R', schema: schema);
+
+      // A real enum is emitted, with an unknown fallback member.
+      expect(code, contains('enum Status {'));
+      expect(code, contains('active'));
+      expect(code, contains('banned'));
+      expect(code, contains('unknown'));
+      // The field now references the enum, not String.
+      expect(code, contains('Status? status;'));
+      expect(code, contains('Status.fromJson(json[\'status\'])'));
+      expect(code, contains('status?.toJson()'));
+    });
+
+    test('raw enum values are mapped to valid Dart identifiers but preserved',
+        () {
+      const json = '{"state": "string"}';
+      final schema = {
+        'type': 'object',
+        'properties': {
+          'state': {
+            'type': 'string',
+            'enum': ['in-progress', 'done'],
+          },
+        },
+      };
+
+      final code = generator.generate(json, 'R', schema: schema);
+
+      // `in-progress` -> `inProgress` member, but the wire value is preserved.
+      expect(code, contains('inProgress'));
+      expect(code, contains("'in-progress'"));
+    });
+
+    test('string field without enum stays String', () {
+      const json = '{"name": "string"}';
+      final schema = {
+        'type': 'object',
+        'properties': {
+          'name': {'type': 'string'},
+        },
+      };
+
+      final code = generator.generate(json, 'R', schema: schema);
+
+      expect(code, contains('String? name;'));
+      expect(code, isNot(contains('enum ')));
+    });
+
+    test('no schema means no enums (unchanged behavior)', () {
+      const json = '{"status": "active"}';
+
+      final code = generator.generate(json, 'R');
+
+      expect(code, contains('String? status;'));
+      expect(code, isNot(contains('enum ')));
+    });
+  });
+
   group('EndpointTree', () {
     test('counts total endpoints correctly', () {
       final tree = EndpointTree(

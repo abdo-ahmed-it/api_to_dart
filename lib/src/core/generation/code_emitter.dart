@@ -42,8 +42,9 @@ class CodeEmitter {
       if (generateAction) {
         if (hasResponse) {
           final action = _actionGenerator.generate(endpoint);
-          final responseCode =
-              _responseGenerator.generate(response.jsonBody!, responseClassName);
+          final responseCode = _responseGenerator.generate(
+              response.jsonBody!, responseClassName,
+              schema: response.schema);
           fileContent = '$action\n\n$responseCode\n';
         } else {
           fileContent = _actionGenerator.generateActionOnly(endpoint);
@@ -56,8 +57,9 @@ class CodeEmitter {
               '(response-only mode).');
           return null;
         }
-        fileContent =
-            _responseGenerator.generate(response.jsonBody!, responseClassName);
+        fileContent = _responseGenerator.generate(
+            response.jsonBody!, responseClassName,
+            schema: response.schema);
       }
 
       final formatter = DartFormatter(
@@ -115,16 +117,18 @@ class CodeEmitter {
       if (generateAction) {
         if (hasResponse) {
           final action = _actionGenerator.generate(endpoint);
-          final responseCode =
-              _responseGenerator.generate(response.jsonBody!, responseClassName);
+          final responseCode = _responseGenerator.generate(
+              response.jsonBody!, responseClassName,
+              schema: response.schema);
           fileContent = '$action\n\n$responseCode\n';
         } else {
           fileContent = _actionGenerator.generateActionOnly(endpoint);
         }
       } else {
         if (!hasResponse) return null;
-        fileContent =
-            _responseGenerator.generate(response.jsonBody!, responseClassName);
+        fileContent = _responseGenerator.generate(
+            response.jsonBody!, responseClassName,
+            schema: response.schema);
       }
 
       final formatter = DartFormatter(

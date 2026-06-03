@@ -30,10 +30,74 @@ class WithWarning<T> {
   WithWarning(this.result, this.warnings);
 }
 
+/// A generated Dart enum produced from an OpenAPI `enum` schema.
+///
+/// Emits a named enum with an extra `unknown` member plus `fromJson`/`toJson`
+/// so that values the server later adds (and the spec didn't list) deserialize
+/// to `unknown` instead of throwing — keeping deployed clients forward
+/// compatible.
+class EnumDefinition {
+  final String name;
+  final List<String> values;
+
+  EnumDefinition(this.name, this.values);
+
+  /// Maps a raw enum value (e.g. `"in-progress"`) to a valid Dart identifier
+  /// (`inProgress`). Falls back to a `$value<index>` form if the value has no
+  /// usable characters (e.g. `"%"`).
+  String _memberName(String value, int index) {
+    final camel = camelCaseFirstLower(value);
+    if (camel.isEmpty || _startsWithDigit(camel)) {
+      return r'$value' '$index';
+    }
+    return camel;
+  }
+
+  bool _startsWithDigit(String s) =>
+      s.isNotEmpty && s.codeUnitAt(0) >= 48 && s.codeUnitAt(0) <= 57;
+
+  @override
+  String toString() {
+    final members = <String>[];
+    final fromJsonCases = <String>[];
+    for (var i = 0; i < values.length; i++) {
+      final raw = values[i];
+      final member = _memberName(raw, i);
+      members.add(member);
+      fromJsonCases.add("      '$raw' => $name.$member,");
+    }
+    final sb = StringBuffer();
+    sb.writeln('enum $name {');
+    for (final m in members) {
+      sb.writeln('  $m,');
+    }
+    sb.writeln('  unknown;');
+    sb.writeln();
+    sb.writeln('  static $name fromJson(Object? value) => switch (value) {');
+    for (final c in fromJsonCases) {
+      sb.writeln(c);
+    }
+    sb.writeln('      _ => $name.unknown,');
+    sb.writeln('    };');
+    sb.writeln();
+    sb.writeln(
+        "  String? toJson() => this == $name.unknown ? null : _wireValue[this];");
+    sb.writeln();
+    sb.writeln('  static const Map<$name, String> _wireValue = {');
+    for (var i = 0; i < values.length; i++) {
+      sb.writeln("    $name.${members[i]}: '${values[i]}',");
+    }
+    sb.writeln('  };');
+    sb.write('}\n');
+    return sb.toString();
+  }
+}
+
 class TypeDefinition {
   String name;
   String? subtype;
   bool isAmbiguous = false;
+  bool isEnum = false;
   bool _isPrimitive = false;
 
   factory TypeDefinition.fromDynamic(dynamic obj) {
@@ -104,6 +168,12 @@ class TypeDefinition {
     final jsonKey = "json['$key']";
     final fieldKey =
         fixFieldName(key, typeDef: this, privateField: privateField);
+    if (isEnum) {
+      if (name == 'List') {
+        return "$fieldKey = json['$key'] != null ? (json['$key'] as List).map((v) => $subtype.fromJson(v)).toList() : null;";
+      }
+      return "$fieldKey = json['$key'] != null ? $name.fromJson(json['$key']) : null;";
+    }
     if (name == 'dynamic' || name == 'Null') {
       return "$fieldKey = json['$key'];";
     }
@@ -130,6 +200,12 @@ class TypeDefinition {
     final fieldKey =
         fixFieldName(key, typeDef: this, privateField: privateField);
     final thisKey = fieldKey;
+    if (isEnum) {
+      if (name == 'List') {
+        return "result['$key'] = $thisKey?.map((v) => v.toJson()).toList();";
+      }
+      return "result['$key'] = $thisKey?.toJson();";
+    }
     if (name == 'dynamic' || name == 'Null') {
       return "result['$key'] = $thisKey;";
     }
@@ -173,7 +249,9 @@ class ClassDefinition {
     final keys = fields.keys;
     for (var k in keys) {
       final f = fields[k];
-      if (f != null && !f.isPrimitive) {
+      // Enums are emitted as standalone enum declarations, not nested data
+      // classes, so they must not be treated as object dependencies.
+      if (f != null && !f.isPrimitive && !f.isEnum) {
         dependenciesList.add(Dependency(k, f));
       }
     }

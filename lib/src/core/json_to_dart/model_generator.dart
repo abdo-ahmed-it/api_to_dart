@@ -2,6 +2,7 @@ import 'dart:collection';
 
 import 'package:dart_style/dart_style.dart';
 
+import 'enum_extractor.dart';
 import 'helpers.dart';
 import 'syntax.dart';
 
@@ -27,7 +28,18 @@ class ModelGenerator {
   final Set<String> _usedClassNames = {};
   late List<Hint> hints;
 
-  ModelGenerator(this._rootClassName, [this._privateFields = false, hints]) {
+  /// Enum corrections sourced from an OpenAPI schema, keyed by field path.
+  final List<EnumHint> enumHints;
+
+  /// Enum declarations to emit, deduped by enum name.
+  final Map<String, EnumDefinition> _enums = {};
+
+  ModelGenerator(
+    this._rootClassName, [
+    this._privateFields = false,
+    hints,
+    List<EnumHint>? enumHints,
+  ]) : enumHints = enumHints ?? <EnumHint>[] {
     if (hints != null) {
       this.hints = hints;
     } else {
@@ -40,6 +52,13 @@ class ModelGenerator {
         hints.firstWhere((h) => h.path == path, orElse: () => Hint("", ""));
     if (hint.path == "") {
       return null;
+    }
+    return hint;
+  }
+
+  EnumHint? _enumHintForPath(String path) {
+    for (final h in enumHints) {
+      if (h.path == path) return h;
     }
     return null;
   }
@@ -97,6 +116,20 @@ class ModelGenerator {
         }
         if (typeDef.name == 'Null') {
           typeDef.name = 'dynamic';
+        }
+        // OpenAPI-sourced enum: replace the inferred String (or List<String>)
+        // with a reference to a generated Dart enum.
+        final enumHint = _enumHintForPath('$path/$key');
+        if (enumHint != null) {
+          _enums.putIfAbsent(
+              enumHint.name, () => EnumDefinition(enumHint.name, enumHint.values));
+          typeDef.isEnum = true;
+          if (typeDef.name == 'List') {
+            typeDef.subtype = enumHint.name;
+          } else {
+            typeDef.name = enumHint.name;
+            typeDef.subtype = null;
+          }
         }
         classDefinition.addField(key, typeDef);
       }
@@ -165,7 +198,9 @@ class ModelGenerator {
       final fieldsKeys = c.fields.keys;
       for (var f in fieldsKeys) {
         final typeForField = c.fields[f];
-        if (typeForField != null) {
+        // Enum-typed fields point at standalone enum declarations and must not
+        // be remapped through the data-class dedup table.
+        if (typeForField != null && !typeForField.isEnum) {
           if (sameClassMapping.containsKey(typeForField.name)) {
             c.fields[f]!.name = sameClassMapping[typeForField.name]!;
           }
@@ -176,7 +211,10 @@ class ModelGenerator {
         }
       }
     }
-    return DartCode(allClasses.map((c) => c.toString()).join('\n'), warnings);
+    final classCode = allClasses.map((c) => c.toString()).join('\n');
+    final enumCode = _enums.values.map((e) => e.toString()).join('\n');
+    final code = enumCode.isEmpty ? classCode : '$classCode\n$enumCode';
+    return DartCode(code, warnings);
   }
 
   DartCode generateDartClasses(String rawJson) {
