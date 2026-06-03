@@ -35,8 +35,7 @@ class CodeEmitter {
     bool generateAction = true,
   }) {
     try {
-      final name = endpoint.name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
-      final responseClassName = '${name}Response';
+      final responseClassName = endpoint.responseClassName;
       final hasResponse = response != null && response.hasJson;
 
       String fileContent;
@@ -109,8 +108,7 @@ class CodeEmitter {
     bool generateAction = true,
   }) {
     try {
-      final name = endpoint.name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
-      final responseClassName = '${name}Response';
+      final responseClassName = endpoint.responseClassName;
       final hasResponse = response != null && response.hasJson;
 
       String fileContent;
