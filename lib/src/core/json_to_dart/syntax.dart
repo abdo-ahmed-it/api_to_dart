@@ -69,7 +69,8 @@ class TypeDefinition {
     }
   }
 
-  bool operator(other) {
+  @override
+  bool operator ==(Object other) {
     if (other is TypeDefinition) {
       TypeDefinition otherTypeDef = other;
       return name == otherTypeDef.name &&
@@ -79,6 +80,9 @@ class TypeDefinition {
     }
     return false;
   }
+
+  @override
+  int get hashCode => Object.hash(name, subtype, isAmbiguous, _isPrimitive);
 
   bool get isPrimitive => _isPrimitive;
 
@@ -178,12 +182,24 @@ class ClassDefinition {
 
   ClassDefinition(this._name, [this._privateFields = false]);
 
-  bool operator(other) {
+  @override
+  bool operator ==(Object other) {
     if (other is ClassDefinition) {
       ClassDefinition otherClassDef = other;
       return isSubsetOf(otherClassDef) && otherClassDef.isSubsetOf(this);
     }
     return false;
+  }
+
+  @override
+  int get hashCode {
+    // Equality is structural (same set of field name -> type), so the hash
+    // must be order-independent over the (key, type) pairs.
+    var h = 0;
+    for (final key in fields.keys) {
+      h ^= Object.hash(key, fields[key]);
+    }
+    return h;
   }
 
   bool isSubsetOf(ClassDefinition other) {
