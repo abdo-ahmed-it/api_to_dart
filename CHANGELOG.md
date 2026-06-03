@@ -1,3 +1,21 @@
+## 0.3.2
+
+### Fixed
+- Endpoints sharing a path but differing in HTTP method (e.g. `GET /users`
+  and `POST /users`) no longer overwrite each other. Generated action and
+  file names are now prefixed with the method
+  (`GetUsersAction` / `get_users_action.dart`,
+  `PostUsersAction` / `post_users_action.dart`). The prefix is skipped when
+  the name already starts with the method to avoid duplication like
+  `GetGetUsers`.
+- Fixed structural equality in the json_to_dart model deduplication.
+  `TypeDefinition` / `ClassDefinition` declared a method named `operator`
+  instead of overriding `operator ==`, so `==` fell back to identity and
+  identical nested objects were never merged — emitting duplicate suffixed
+  classes (`Data2`, `Links2`) plus orphan, never-referenced classes.
+  Structurally identical objects now collapse to one class while distinct
+  same-named objects still get distinct names.
+
 ## 0.3.1
 
 ### Changed
