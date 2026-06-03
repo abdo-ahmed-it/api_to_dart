@@ -77,11 +77,12 @@ void main() {
 
       final code = generator.generate(endpoint);
 
-      expect(code, contains('class LoginAction'));
+      // Method is prefixed so same-path endpoints don't collide on names.
+      expect(code, contains('class PostLoginAction'));
       expect(code, contains('RequestMethod.POST'));
       expect(code, contains("path => '/auth/login'"));
       expect(code, contains('authRequired => true'));
-      expect(code, contains('LoginResponse'));
+      expect(code, contains('PostLoginResponse'));
     });
 
     test('generates action-only class', () {
@@ -94,9 +95,24 @@ void main() {
 
       final code = generator.generateActionOnly(endpoint);
 
+      // Name already starts with the method → no "GetGetUsers" duplication.
       expect(code, contains('class GetUsersAction'));
       expect(code, contains('ApiRequestAction<dynamic>'));
       expect(code, contains('RequestMethod.GET'));
+    });
+
+    test('same path different methods produce distinct file and class names',
+        () {
+      const get = ApiEndpoint(name: 'Users', path: '/users', method: HttpMethod.GET);
+      const post =
+          ApiEndpoint(name: 'Users', path: '/users', method: HttpMethod.POST);
+
+      expect(get.fileName, equals('get_users_action.dart'));
+      expect(post.fileName, equals('post_users_action.dart'));
+      expect(get.fileName, isNot(equals(post.fileName)));
+      expect(get.actionClassName, equals('GetUsersAction'));
+      expect(post.actionClassName, equals('PostUsersAction'));
+      expect(get.responseClassName, equals('GetUsersResponse'));
     });
   });
 

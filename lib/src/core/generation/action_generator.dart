@@ -7,8 +7,8 @@ class ActionGenerator {
   /// Generates a Dart action class string for the given endpoint.
   /// The generated class extends ApiRequestAction from the api_request package.
   String generate(ApiEndpoint endpoint) {
-    final name = endpoint.name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
-    final responseType = '${name}Response';
+    final actionClassName = endpoint.actionClassName;
+    final responseType = endpoint.responseClassName;
 
     final authText = _getAuthRequiredText(endpoint);
     final toMapText = _getToMapText(endpoint);
@@ -19,7 +19,7 @@ class ActionGenerator {
 import 'package:api_request/api_request.dart';
 
 
-class ${name}Action extends ApiRequestAction<$responseType> {
+class $actionClassName extends ApiRequestAction<$responseType> {
   $authText
 
   @override
@@ -44,7 +44,7 @@ class ${name}Action extends ApiRequestAction<$responseType> {
   /// Generates an action-only class (no response model) when response
   /// data is unavailable.
   String generateActionOnly(ApiEndpoint endpoint) {
-    final name = endpoint.name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+    final actionClassName = endpoint.actionClassName;
 
     final authText = _getAuthRequiredText(endpoint);
     final toMapText = _getToMapText(endpoint);
@@ -55,7 +55,7 @@ class ${name}Action extends ApiRequestAction<$responseType> {
 import 'package:api_request/api_request.dart';
 
 
-class ${name}Action extends ApiRequestAction<dynamic> {
+class $actionClassName extends ApiRequestAction<dynamic> {
   $authText
 
   @override

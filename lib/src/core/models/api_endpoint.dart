@@ -27,12 +27,22 @@ class ApiEndpoint {
     this.response,
   });
 
-  /// PascalCase name stripped of non-alphanumeric chars.
+  /// PascalCase name stripped of non-alphanumeric chars, prefixed with the
+  /// HTTP method so endpoints sharing a path (e.g. `GET /users` and
+  /// `POST /users`) don't collide on class/file names.
   String get _cleanName {
     final stripped = name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
-    if (stripped.isEmpty) return 'Unknown';
-    // Ensure first letter is uppercase
-    return stripped[0].toUpperCase() + stripped.substring(1);
+    final raw = stripped.isEmpty ? 'Unknown' : stripped;
+    final base = '${raw[0].toUpperCase()}${raw.substring(1)}';
+    // PascalCase the method (GET -> Get) and prepend it so endpoints sharing a
+    // path differ by method. Skip when the name already starts with the method
+    // (e.g. "GetUsers" + GET) to avoid "GetGetUsers".
+    final methodPart = method.name[0].toUpperCase() +
+        method.name.substring(1).toLowerCase();
+    if (base.toLowerCase().startsWith(method.name.toLowerCase())) {
+      return base;
+    }
+    return '$methodPart$base';
   }
 
   String get actionClassName => '${_cleanName}Action';
@@ -43,7 +53,7 @@ class ApiEndpoint {
     // Convert PascalCase to snake_case
     final snake = _cleanName
         .replaceAllMapped(
-            RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]}_${m[2]}')
+            RegExp(r'([a-z0-9])([A-Z])'), (m) => '${m[1]}_${m[2]}')
         .toLowerCase();
     return '${snake}_action.dart';
   }
