@@ -203,6 +203,20 @@ void main() {
       expect(res['code'], isNot(contains('ApiRequestAction')));
     });
 
+    test('/api/dirs lists subfolders and clamps escapes to root', () async {
+      // lib/ exists in the project root the test runs from
+      final root = await _getJson('$base/api/dirs?path=');
+      expect(root['parent'], isNull);
+      expect(root['dirs'], isA<List>());
+      expect((root['dirs'] as List), contains('lib'));
+
+      // leading `..` segments are dropped (can't climb above root); the
+      // resolved path never contains `..`, so it stays inside the project.
+      final escaped = await _getJson('$base/api/dirs?path=../../../etc');
+      expect((escaped['path'] as String).contains('..'), isFalse);
+      expect(escaped['path'], 'etc'); // resolves under root, not /etc
+    });
+
     test('/api/try requires a URL', () async {
       final client = HttpClient();
       final req = await client.postUrl(Uri.parse('$base/api/try'));

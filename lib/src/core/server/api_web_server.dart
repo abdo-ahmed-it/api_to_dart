@@ -277,6 +277,11 @@ class ApiWebServer {
       return;
     }
 
+    if (method == 'GET' && path == '/api/dirs') {
+      _handleDirs(req);
+      return;
+    }
+
     if (method == 'POST' && path == '/api/try') {
       final body = await utf8.decoder.bind(req).join();
       await _handleTry(req, body);
@@ -407,6 +412,50 @@ class ApiWebServer {
           '// No code could be generated for this endpoint yet.\n'
               '// Send the request first to capture a response, or check the mode.',
       'hasResponse': ep.response?.hasJson ?? false,
+    });
+  }
+
+  /// Lists subdirectories under a project-relative path so the browser can let
+  /// the user pick an output dir instead of typing it. Confined to the project
+  /// root (the server's CWD) — `..` segments that would escape are clamped.
+  void _handleDirs(HttpRequest req) {
+    final root = Directory.current;
+    // Normalize the requested relative path and keep it inside the project.
+    var rel = (req.uri.queryParameters['path'] ?? '').trim();
+    rel = rel.replaceAll('\\', '/');
+    final parts = <String>[];
+    for (final seg in rel.split('/')) {
+      if (seg.isEmpty || seg == '.') continue;
+      if (seg == '..') {
+        if (parts.isNotEmpty) parts.removeLast();
+        continue;
+      }
+      parts.add(seg);
+    }
+    final relPath = parts.join('/');
+    final dir = relPath.isEmpty ? root : Directory('${root.path}/$relPath');
+
+    final dirs = <String>[];
+    try {
+      if (dir.existsSync()) {
+        for (final e in dir.listSync(followLinks: false)) {
+          if (e is Directory) {
+            final name = e.path.split(Platform.pathSeparator).last;
+            // hide dot-dirs and common noise
+            if (name.startsWith('.')) continue;
+            if (name == 'build' || name == '.dart_tool') continue;
+            dirs.add(name);
+          }
+        }
+      }
+    } catch (_) {/* permission etc. — return what we have */}
+    dirs.sort();
+
+    _json(req, 200, {
+      'path': relPath, // current relative path ('' = project root)
+      'parent':
+          parts.isEmpty ? null : parts.sublist(0, parts.length - 1).join('/'),
+      'dirs': dirs,
     });
   }
 

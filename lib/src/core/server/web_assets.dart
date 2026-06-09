@@ -213,6 +213,25 @@ const String indexHtml = r'''<!DOCTYPE html>
   .gr-logs summary:hover{color:var(--ink)}
   .gr-logs pre{margin-top:8px;background:#060b16;border:1px solid var(--line);border-radius:8px;
     padding:10px;font-size:11px;color:var(--muted);max-height:160px;overflow:auto;white-space:pre-wrap}
+  /* folder picker modal */
+  .out-browse{padding:6px 11px;font-size:12px;flex:0 0 auto}
+  .pick-overlay{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.55);
+    display:flex;align-items:center;justify-content:center;padding:20px}
+  .pick{width:520px;max-width:100%;max-height:78vh;display:flex;flex-direction:column;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 24px 60px rgba(0,0,0,.55);overflow:hidden}
+  .pick-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .pick-title{font-weight:700;font-size:14px}.pick-head .iconbtn{margin-left:auto}
+  .pick-path{padding:10px 18px;font-family:monospace;font-size:12px;color:var(--accent);
+    border-bottom:1px solid var(--line);word-break:break-all}
+  .pick-list{flex:1;overflow:auto;padding:6px 0;min-height:120px}
+  .pick-item{display:flex;align-items:center;gap:10px;padding:9px 18px;cursor:pointer;font-size:13px;user-select:none}
+  .pick-item:hover{background:var(--panel2)}
+  .pick-item .ico{font-size:15px}
+  .pick-item.up{color:var(--muted)}
+  .pick-empty{color:var(--faint);text-align:center;padding:24px;font-size:13px}
+  .pick-foot{display:flex;align-items:center;gap:12px;padding:13px 18px;border-top:1px solid var(--line)}
+  .pick-sel{flex:1;font-family:monospace;font-size:12px;color:var(--muted);word-break:break-all}
   .hidden{display:none!important}
 
   /* hamburger + overlay (hidden on desktop) */
@@ -336,6 +355,7 @@ const String indexHtml = r'''<!DOCTYPE html>
             <label class="out-field">
               <span>Output dir</span>
               <input id="outDir" placeholder="(default)">
+              <button class="btn out-browse" id="outBrowse" type="button">📁 Browse</button>
               <button class="link out-apply" id="outApplyDir" type="button">apply to all</button>
             </label>
             <label class="out-field">
@@ -390,6 +410,21 @@ const String indexHtml = r'''<!DOCTYPE html>
 </div>
 
 <div class="genres hidden" id="genres"></div>
+
+<div class="pick-overlay hidden" id="pickOverlay">
+  <div class="pick">
+    <div class="pick-head">
+      <span class="pick-title">Choose output folder</span>
+      <button class="iconbtn" id="pickClose" title="Close">✕</button>
+    </div>
+    <div class="pick-path" id="pickPath"></div>
+    <div class="pick-list" id="pickList"></div>
+    <div class="pick-foot">
+      <span class="pick-sel" id="pickSel"></span>
+      <button class="btn primary" id="pickUse">Use this folder</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const $=(s,el=document)=>el.querySelector(s);
@@ -690,6 +725,51 @@ $('#outApplyDir').onclick=()=>{
   }
   $('#outApplyDir').textContent='applied ✓';
   setTimeout(()=>{$('#outApplyDir').textContent='apply to all';},1200);
+};
+
+// ---- folder picker ----
+let PICK_PATH='';
+async function loadDirs(p){
+  PICK_PATH=p||'';
+  let d;
+  try{d=await jget('/api/dirs?path='+encodeURIComponent(PICK_PATH));}
+  catch(e){$('#pickList').innerHTML=`<div class="pick-empty">Failed to read folders</div>`;return;}
+  PICK_PATH=d.path||'';
+  $('#pickPath').textContent='/'+PICK_PATH;
+  $('#pickSel').textContent='Selected: '+(PICK_PATH||'(project root)');
+  const list=$('#pickList');list.innerHTML='';
+  // ".." up a level (not at root)
+  if(d.parent!==null){
+    const up=document.createElement('div');up.className='pick-item up';
+    up.innerHTML=`<span class="ico">↩</span><span>..</span>`;
+    up.onclick=()=>loadDirs(d.parent);
+    list.appendChild(up);
+  }
+  if(!d.dirs.length && d.parent===null){
+    // root with no visible subdirs is fine; show hint
+  }
+  for(const name of d.dirs){
+    const it=document.createElement('div');it.className='pick-item';
+    it.innerHTML=`<span class="ico">📁</span><span>${esc(name)}</span>`;
+    it.onclick=()=>loadDirs(PICK_PATH?PICK_PATH+'/'+name:name);
+    list.appendChild(it);
+  }
+  if(!list.children.length){
+    list.innerHTML=`<div class="pick-empty">No subfolders here. Use this folder, or go up.</div>`;
+  }
+}
+$('#outBrowse').onclick=()=>{
+  $('#pickOverlay').classList.remove('hidden');
+  // start from the current value if it looks project-relative, else root
+  const cur=$('#outDir').value.trim();
+  loadDirs(cur && !cur.startsWith('/') ? cur : '');
+};
+$('#pickClose').onclick=()=>$('#pickOverlay').classList.add('hidden');
+$('#pickOverlay').onclick=e=>{if(e.target===$('#pickOverlay'))$('#pickOverlay').classList.add('hidden');};
+$('#pickUse').onclick=()=>{
+  $('#outDir').value=PICK_PATH;
+  $('#pickOverlay').classList.add('hidden');
+  updateOutHint();markDirty();
 };
 
 // small "edited" indicator next to the endpoint name
