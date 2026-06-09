@@ -26,7 +26,17 @@ class RequestLog {
     this.receivedTime,
   });
 
-  String toMarkdown() {
+  /// Marker that opens the hidden metadata block embedded in every log file.
+  /// The block holds the full request as JSON so `api2dart resend` can
+  /// reconstruct and replay it without parsing the human-facing sections.
+  static const String _metaOpen = '<!-- api2dart:request';
+  static const String _metaClose = '-->';
+
+  /// Renders the log as Markdown. [fileName] (without extension) is used in
+  /// the Resend snippet so the printed `api2dart resend '<file>.md'` matches
+  /// the file this log is actually written to.
+  String toMarkdown({String? fileName}) {
+    final resendName = fileName ?? requestName;
     final sb = StringBuffer();
     final duration = (receivedTime ?? sentTime).difference(sentTime);
     final statusLine = _formatStatus(statusCode);
@@ -95,8 +105,72 @@ class RequestLog {
     sb.writeln('```bash');
     sb.writeln(_buildCurl());
     sb.writeln('```');
+    sb.writeln();
+
+    sb.writeln('## Resend');
+    sb.writeln();
+    sb.writeln('Re-run this exact request and overwrite this file with the '
+        'fresh response:');
+    sb.writeln();
+    sb.writeln('```bash');
+    sb.writeln("api2dart resend '$resendName.md'");
+    sb.writeln('```');
+    sb.writeln();
+
+    // Hidden machine-readable request block — the source of truth for
+    // `resend`. Not rendered by Markdown viewers.
+    sb.writeln(_metaBlock());
 
     return sb.toString();
+  }
+
+  /// Serializes the request (everything needed to replay it) as a hidden
+  /// HTML comment. Response/timing are intentionally excluded — they're
+  /// regenerated on resend.
+  String _metaBlock() {
+    final meta = <String, dynamic>{
+      'requestName': requestName,
+      'requestMethod': requestMethod,
+      'url': url,
+      'headers': headers,
+      'queryParameters': queryParameters,
+      'requestBody': requestBody,
+    };
+    return '$_metaOpen ${jsonEncode(meta)} $_metaClose';
+  }
+
+  /// Reconstructs a [RequestLog] from the hidden metadata block in a previously
+  /// written log file. Only the request portion is restored; status, response
+  /// and timing are left empty and filled in when the request is resent.
+  ///
+  /// Returns `null` if no metadata block is found (e.g. an older log file).
+  static RequestLog? fromMarkdown(String content) {
+    final start = content.indexOf(_metaOpen);
+    if (start < 0) return null;
+    final end = content.indexOf(_metaClose, start + _metaOpen.length);
+    if (end < 0) return null;
+
+    final json = content.substring(start + _metaOpen.length, end).trim();
+    final Map<String, dynamic> meta;
+    try {
+      meta = jsonDecode(json) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+
+    Map<String, String> stringMap(dynamic v) => v is Map
+        ? v.map((k, val) => MapEntry(k.toString(), val.toString()))
+        : <String, String>{};
+
+    return RequestLog(
+      requestName: meta['requestName']?.toString() ?? 'request',
+      requestMethod: meta['requestMethod']?.toString() ?? 'GET',
+      url: meta['url']?.toString() ?? '',
+      headers: stringMap(meta['headers']),
+      queryParameters: stringMap(meta['queryParameters']),
+      requestBody: meta['requestBody'],
+      sentTime: DateTime.now(),
+    );
   }
 
   /// Writes the log as a `.md` file under [logsDir]. The directory is created
@@ -105,7 +179,7 @@ class RequestLog {
     final dir = Directory(logsDir);
     dir.createSync(recursive: true);
     final filePath = '${dir.path}/$fileName.md';
-    File(filePath).writeAsStringSync(toMarkdown());
+    File(filePath).writeAsStringSync(toMarkdown(fileName: fileName));
   }
 
   String _formatStatus(int? code) {
@@ -149,8 +223,7 @@ class RequestLog {
     final local = t.isUtc ? t.toLocal() : t;
     String two(int n) => n.toString().padLeft(2, '0');
     String three(int n) => n.toString().padLeft(3, '0');
-    final date =
-        '${local.year}-${two(local.month)}-${two(local.day)}';
+    final date = '${local.year}-${two(local.month)}-${two(local.day)}';
     final time =
         '${two(local.hour)}:${two(local.minute)}:${two(local.second)}.${three(local.millisecond)}';
     return '`$date $time`';

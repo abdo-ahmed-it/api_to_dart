@@ -6,6 +6,7 @@ import '../core/logger/console_logger.dart';
 import '../core/update_checker.dart';
 import '../core/version.dart';
 import 'commands/generate_command.dart';
+import 'commands/resend_command.dart';
 import 'commands/reset_command.dart';
 import 'commands/upgrade_command.dart';
 import 'commands/version_command.dart';
@@ -23,6 +24,7 @@ class CliApp {
               'wizard, or pass `-c <file>` to run non-interactively.',
         ) {
     _runner.addCommand(GenerateCommand());
+    _runner.addCommand(ResendCommand());
     _runner.addCommand(ResetCommand());
     _runner.addCommand(VersionCommand());
     _runner.addCommand(UpgradeCommand());
