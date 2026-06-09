@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -11,6 +12,7 @@ import '../../core/models/endpoint_tree.dart';
 import '../../core/models/response_definition.dart';
 import '../../core/resolution/http_client.dart';
 import '../../core/resolution/response_resolver.dart';
+import '../../core/server/api_web_server.dart';
 import '../../core/sources/api_fetchers/apidog_fetcher.dart';
 import '../../core/sources/api_fetchers/config_storage.dart';
 import '../../core/sources/api_fetchers/postman_fetcher.dart';
@@ -84,6 +86,16 @@ class GenerateWizard {
 
     stdout.writeln('');
 
+    // Optional web UI — starts alongside the terminal selector and prints a
+    // link the user *may* click to browse/select/generate in the browser. The
+    // terminal flow below is unchanged; the server keeps running until the
+    // process exits (Ctrl+C).
+    final webRunning = await _maybeStartWebServer(
+      tree: tree,
+      baseUrl: baseUrl,
+      token: token,
+    );
+
     // Step 2 & 3: Select and generate loop
     final selector = EndpointSelector(tree);
 
@@ -92,6 +104,12 @@ class GenerateWizard {
       final selected = selector.selectInteractively();
 
       if (selected == null || selected.isEmpty) {
+        if (webRunning) {
+          _logger.i('Terminal selection done. The web UI is still running — '
+              'use it any time, or press Ctrl+C to stop.');
+          // Keep the process alive so the web UI stays reachable.
+          await Completer<void>().future;
+        }
         _logger.i('Done.');
         return;
       }
@@ -114,13 +132,55 @@ class GenerateWizard {
 
   void _printBanner() {
     stdout.writeln('');
-    stdout.writeln(TerminalUtils.bold(
-        '┌─────────────────────────────────────┐'));
-    stdout.writeln(TerminalUtils.bold(
-        '│   🚀 API to Dart                     │'));
-    stdout.writeln(TerminalUtils.bold(
-        '└─────────────────────────────────────┘'));
+    stdout
+        .writeln(TerminalUtils.bold('┌─────────────────────────────────────┐'));
+    stdout.writeln(
+        TerminalUtils.bold('│   🚀 API to Dart                     │'));
+    stdout
+        .writeln(TerminalUtils.bold('└─────────────────────────────────────┘'));
     stdout.writeln('');
+  }
+
+  /// Best-effort: spins up the local web UI alongside the terminal selector and
+  /// prints a link the user may optionally open to browse/select/generate in
+  /// the browser. Writes the same files (same outputDir/logsDir/mode) as the
+  /// terminal flow. A failure (e.g. busy port) is non-fatal — the wizard
+  /// continues in the terminal as usual.
+  /// Returns true if the web server started (so the caller can tell the user
+  /// to Ctrl+C to stop it on exit).
+  Future<bool> _maybeStartWebServer({
+    required EndpointTree tree,
+    required String? baseUrl,
+    required String? token,
+  }) async {
+    try {
+      final generateAction = PubspecInspector.hasApiRequestDependency();
+      final dateFolder = _todayFolder();
+      final outputDir = 'api2dart/$dateFolder/actions';
+      final logsDir = 'api2dart/$dateFolder/logs';
+
+      final server = ApiWebServer(
+        tree: tree,
+        outputDir: outputDir,
+        logsDir: logsDir,
+        baseUrl: baseUrl,
+        token: token,
+        generateAction: generateAction,
+        logger: _logger,
+      );
+      final url = await server.start(4321);
+
+      stdout.writeln(
+          TerminalUtils.gray('  ◦ Prefer a browser? Open the web UI: ') +
+              TerminalUtils.cyan(url));
+      stdout.writeln(TerminalUtils.gray(
+          '    (optional — the terminal selector below works too)'));
+      stdout.writeln('');
+      return true;
+    } catch (_) {
+      // Non-fatal: the terminal selector is always available.
+      return false;
+    }
   }
 
   // ── Load from saved settings ────────────────────────────────────────
@@ -135,7 +195,8 @@ class GenerateWizard {
 
       case 'postman_api':
         final apiKey = ConfigStorage.get('postman.api_key');
-        final collectionUid = ConfigStorage.get('wizard.postman_collection_uid');
+        final collectionUid =
+            ConfigStorage.get('wizard.postman_collection_uid');
         if (apiKey == null || collectionUid == null) return null;
 
         // Refresh environment variables if one was previously selected.
@@ -165,7 +226,8 @@ class GenerateWizard {
         final envIdStr = ConfigStorage.get('apidog.environment_id');
         final envId = envIdStr != null ? int.tryParse(envIdStr) : null;
         final envName = ConfigStorage.get('apidog.environment_name') ?? '';
-        _logger.i('Using saved settings: Apidog (Project: $projectId, Env: $envName)');
+        _logger.i(
+            'Using saved settings: Apidog (Project: $projectId, Env: $envName)');
 
         // Fetch fresh environment variables
         final fetcher = ApidogFetcher(token: token, logger: _logger);
@@ -316,8 +378,7 @@ class GenerateWizard {
     final workspaces = await fetcher.getWorkspaces();
 
     if (workspaces.isEmpty) {
-      _logger.e(
-          'No workspaces found. The saved Postman API key may be invalid '
+      _logger.e('No workspaces found. The saved Postman API key may be invalid '
           'or expired.\n'
           '  Run `api2dart reset --all` to clear it and try a new one.');
       return null;
@@ -332,7 +393,8 @@ class GenerateWizard {
 
     // Environment selection (optional)
     _logger.i('Loading environments...');
-    final environments = await fetcher.getEnvironments(workspaceId: workspaceId);
+    final environments =
+        await fetcher.getEnvironments(workspaceId: workspaceId);
     PostmanEnvironment? selectedEnv;
 
     if (environments.isEmpty) {
@@ -359,8 +421,7 @@ class GenerateWizard {
     }
 
     _logger.i('Loading collections...');
-    final collections =
-        await fetcher.getCollections(workspaceId: workspaceId);
+    final collections = await fetcher.getCollections(workspaceId: workspaceId);
 
     if (collections.isEmpty) {
       _logger.e('No collections found in this workspace');
@@ -385,10 +446,8 @@ class GenerateWizard {
       ConfigStorage.set(
           'wizard.postman_collection_uid', collections[colIndex].uid);
       if (selectedEnv != null) {
-        ConfigStorage.set(
-            'wizard.postman_environment_uid', selectedEnv.uid);
-        ConfigStorage.set(
-            'wizard.postman_environment_name', selectedEnv.name);
+        ConfigStorage.set('wizard.postman_environment_uid', selectedEnv.uid);
+        ConfigStorage.set('wizard.postman_environment_name', selectedEnv.name);
       } else {
         ConfigStorage.remove('wizard.postman_environment_uid');
         ConfigStorage.remove('wizard.postman_environment_name');
@@ -417,8 +476,7 @@ class GenerateWizard {
 
     try {
       final source = PostmanSource();
-      final tree =
-          await source.parse(ApiSourceConfig(filePath: tempFile.path));
+      final tree = await source.parse(ApiSourceConfig(filePath: tempFile.path));
 
       final content = jsonDecode(collectionJson);
       // Merge: collection variables first, environment variables override.
@@ -430,10 +488,8 @@ class GenerateWizard {
       _logger.i('✓ ${tree.sourceName}: ${tree.totalEndpoints} endpoints');
 
       // Pick base URL from common variable names.
-      final baseUrl = vars['base_url'] ??
-          vars['baseUrl'] ??
-          vars['url'] ??
-          vars['host'];
+      final baseUrl =
+          vars['base_url'] ?? vars['baseUrl'] ?? vars['url'] ?? vars['host'];
       if (baseUrl != null && baseUrl.isNotEmpty) {
         _logger.i('✓ Base URL: $baseUrl');
       }
@@ -502,9 +558,7 @@ class GenerateWizard {
     if (environments.isNotEmpty) {
       final envIndex = promptSelect(
         message: 'Select environment',
-        options: environments
-            .map((e) => '${e.name} (${e.baseUrl})')
-            .toList(),
+        options: environments.map((e) => '${e.name} (${e.baseUrl})').toList(),
       );
       if (envIndex == -1) return null;
       selectedEnv = environments[envIndex];
@@ -545,8 +599,8 @@ class GenerateWizard {
     final fetcher = ApidogFetcher(token: token, logger: _logger);
 
     _logger.i('Exporting project as OpenAPI...');
-    final openApiJson = await fetcher.exportOpenApi(projectId,
-        environmentId: environmentId);
+    final openApiJson =
+        await fetcher.exportOpenApi(projectId, environmentId: environmentId);
 
     if (openApiJson == null) {
       _logger.e('Failed to export project. Check your token and project ID.');
@@ -577,8 +631,7 @@ class GenerateWizard {
 
     try {
       final source = OpenApiSource();
-      final tree =
-          await source.parse(ApiSourceConfig(filePath: tempFile.path));
+      final tree = await source.parse(ApiSourceConfig(filePath: tempFile.path));
 
       // Extract base URL from environment or servers
       String? baseUrl;
@@ -657,8 +710,8 @@ class GenerateWizard {
   /// Some endpoints use URL variables as path prefixes
   /// (e.g. path "/system_user_url/login" where system_user_url is a variable
   /// pointing to "https://host/api/v1/system-user").
-  String _resolveBaseUrl(
-      ApiEndpoint endpoint, String defaultBaseUrl, Map<String, String> urlVars) {
+  String _resolveBaseUrl(ApiEndpoint endpoint, String defaultBaseUrl,
+      Map<String, String> urlVars) {
     if (urlVars.isEmpty) return defaultBaseUrl;
 
     final path = endpoint.path;
@@ -679,10 +732,12 @@ class GenerateWizard {
   }
 
   /// Gets the clean path for an endpoint, removing URL variable prefixes.
-  String _resolveEndpointPath(ApiEndpoint endpoint, Map<String, String> urlVars) {
+  String _resolveEndpointPath(
+      ApiEndpoint endpoint, Map<String, String> urlVars) {
     if (urlVars.isEmpty) return endpoint.path;
 
-    final segments = endpoint.path.split('/').where((s) => s.isNotEmpty).toList();
+    final segments =
+        endpoint.path.split('/').where((s) => s.isNotEmpty).toList();
     if (segments.isNotEmpty && urlVars.containsKey(segments[0])) {
       // Remove the URL variable prefix from the path
       return '/${segments.sublist(1).join('/')}';
@@ -761,10 +816,10 @@ class GenerateWizard {
           result.log!.statusCode != null &&
           (result.log!.statusCode! < 200 || result.log!.statusCode! >= 300)) {
         final logPath = '${Directory.current.path}/$logsDir/$logFileName.md';
-        final link = TerminalUtils.fileLink(logPath,
-            label: '$logsDir/$logFileName.md');
-        _logger.e(
-            '✗ ${cleanEndpoint.name} (${result.log!.statusCode}) → $link');
+        final link =
+            TerminalUtils.fileLink(logPath, label: '$logsDir/$logFileName.md');
+        _logger
+            .e('✗ ${cleanEndpoint.name} (${result.log!.statusCode}) → $link');
         continue; // Skip generating action for failed requests
       }
 

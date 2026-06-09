@@ -17,6 +17,11 @@
   - Keyboard: `/` focuses search, `Ctrl/Cmd+Enter` sends the request.
   - `--no-open` to skip auto-launching the browser; `-p/--port` to pick a port.
   - Binds to loopback only; works in non-TTY environments (no raw stdin).
+- The interactive wizard (`api2dart` with no args) now also prints an optional
+  web UI link after loading endpoints — for any source (Postman/Apidog/file).
+  The terminal selector still works exactly as before; the link is just an
+  extra way to browse/select/generate in the browser. The server keeps running
+  until you press Ctrl+C.
 
 ## 0.4.0
 
