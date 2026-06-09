@@ -6,6 +6,7 @@ import '../generation/code_emitter.dart';
 import '../logger/logger.dart';
 import '../models/api_endpoint.dart';
 import '../models/api_folder.dart';
+import '../models/body_definition.dart';
 import '../models/endpoint_tree.dart';
 import '../models/response_definition.dart';
 import '../resolution/http_client.dart';
@@ -110,6 +111,22 @@ class ApiWebServer {
       return;
     }
 
+    if (method == 'GET' && path == '/api/endpoint') {
+      _handleEndpointDetail(req);
+      return;
+    }
+
+    if (method == 'GET' && path == '/api/preview') {
+      _handlePreview(req);
+      return;
+    }
+
+    if (method == 'POST' && path == '/api/try') {
+      final body = await utf8.decoder.bind(req).join();
+      await _handleTry(req, body);
+      return;
+    }
+
     if (method == 'POST' && path == '/api/generate') {
       final body = await utf8.decoder.bind(req).join();
       await _handleGenerate(req, body);
@@ -117,6 +134,143 @@ class ApiWebServer {
     }
 
     _json(req, 404, {'error': 'Not found: $method $path'});
+  }
+
+  /// Returns the index from `?index=N`, or null (after writing a 400) if absent
+  /// or out of range.
+  int? _indexParam(HttpRequest req) {
+    final raw = req.uri.queryParameters['index'];
+    final idx = raw == null ? null : int.tryParse(raw);
+    if (idx == null || idx < 0 || idx >= _ordered.length) {
+      _json(req, 400, {'error': 'Invalid or missing ?index'});
+      return null;
+    }
+    return idx;
+  }
+
+  /// Full editable detail for one endpoint — what the "request builder" panel
+  /// pre-fills (method, full URL, headers, query params, body, auth).
+  void _handleEndpointDetail(HttpRequest req) {
+    final idx = _indexParam(req);
+    if (idx == null) return;
+    final ep = _ordered[idx];
+
+    String? bodyKind;
+    String bodyText = '';
+    final formFields = <Map<String, String>>[];
+    final body = ep.body;
+    if (body != null && !body.isEmpty) {
+      if (body.hasRawBody) {
+        bodyKind = 'raw';
+        bodyText = body.rawBody ?? '';
+      } else if (body.hasFormFields) {
+        bodyKind = body.contentType == BodyContentType.urlEncoded
+            ? 'urlencoded'
+            : 'formdata';
+        body.formFields!.forEach((k, v) {
+          formFields.add({'key': k, 'value': v});
+        });
+      }
+    }
+
+    _json(req, 200, {
+      'index': idx,
+      'name': ep.name,
+      'method': ep.method.name,
+      'path': ep.path,
+      'url': _fullUrl(ep),
+      'description': ep.description,
+      'folderPath': _folderPaths[idx],
+      'headers': _kvList(ep.headers),
+      'queryParams': _kvList(ep.queryParams),
+      'auth': {
+        'type': ep.auth.type.name,
+        'token': ep.auth.token ?? '',
+        'headerName': ep.auth.headerName,
+      },
+      'body': {
+        'kind': bodyKind, // null | raw | formdata | urlencoded
+        'raw': bodyText,
+        'fields': formFields,
+      },
+      'responsePreview': ep.response?.jsonBody,
+    });
+  }
+
+  /// The generated Dart code for one endpoint, without writing to disk — uses
+  /// the same [CodeEmitter.generateCode] the disk path uses.
+  void _handlePreview(HttpRequest req) {
+    final idx = _indexParam(req);
+    if (idx == null) return;
+    final ep = _ordered[idx];
+
+    final emitter = CodeEmitter(logger: logger);
+    final code = emitter.generateCode(
+      endpoint: ep,
+      response: ep.response,
+      generateAction: generateAction,
+    );
+
+    _json(req, 200, {
+      'index': idx,
+      'fileName': generateAction
+          ? ep.fileName
+          : ep.fileName.replaceAll('_action.dart', '_response.dart'),
+      'code': code ??
+          '// No code could be generated for this endpoint yet.\n'
+              '// Send the request first to capture a response, or check the mode.',
+      'hasResponse': ep.response?.hasJson ?? false,
+    });
+  }
+
+  /// Sends a one-off request with the (possibly edited) values from the browser
+  /// and returns the live response — the "Try it / Send" feature. Does NOT
+  /// write any files.
+  Future<void> _handleTry(HttpRequest req, String rawBody) async {
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(rawBody) as Map<String, dynamic>;
+    } catch (e) {
+      _json(req, 400, {'error': 'Invalid request body: $e'});
+      return;
+    }
+
+    final url = (payload['url'] as String?)?.trim() ?? '';
+    if (url.isEmpty) {
+      _json(req, 400, {'error': 'A URL is required to send the request.'});
+      return;
+    }
+    final method = _parseMethod(payload['method'] as String? ?? 'GET');
+    final headers = _kvToMap(payload['headers']);
+    final query = _kvToMap(payload['queryParams']);
+    final bodyDef = _bodyFromPayload(payload['body']);
+
+    final httpClient = ApiHttpClient(logger: logger);
+    final result = await httpClient.request(
+      url: url,
+      method: method,
+      headers: headers.isNotEmpty ? headers : null,
+      queryParams: query.isNotEmpty ? query : null,
+      body: bodyDef,
+    );
+
+    if (result == null) {
+      _json(req, 200, {
+        'ok': false,
+        'error': 'Request failed (no response). Check the URL and network.',
+      });
+      return;
+    }
+
+    _json(req, 200, {
+      'ok': true,
+      'status': result.statusCode,
+      'timeMs':
+          result.receivedTime.difference(result.sentTime).inMilliseconds,
+      'requestUrl': result.requestUrl,
+      'responseHeaders': result.headers,
+      'body': result.body,
+    });
   }
 
   Map<String, dynamic> _treeJson() {
@@ -136,8 +290,69 @@ class ApiWebServer {
       'sourceName': tree.sourceName,
       'mode': generateAction ? 'action + response' : 'response-only',
       'outputDir': outputDir,
+      'baseUrl': baseUrl ?? '',
       'endpoints': endpoints,
     };
+  }
+
+  /// Best-effort full URL for an endpoint: `baseUrl + path`, normalizing the
+  /// slash at the join. Falls back to the raw path when no base URL was given.
+  String _fullUrl(ApiEndpoint ep) {
+    final b = baseUrl ?? '';
+    if (b.isEmpty) return ep.path;
+    final base = b.endsWith('/') ? b.substring(0, b.length - 1) : b;
+    final path = ep.path.startsWith('/') ? ep.path : '/${ep.path}';
+    return '$base$path';
+  }
+
+  List<Map<String, String>> _kvList(Map<String, String> map) =>
+      map.entries.map((e) => {'key': e.key, 'value': e.value}).toList();
+
+  /// Converts the browser's `[{key, value}]` list back into a string map,
+  /// skipping blank keys.
+  Map<String, String> _kvToMap(dynamic list) {
+    final out = <String, String>{};
+    if (list is List) {
+      for (final item in list) {
+        if (item is Map) {
+          final k = (item['key'] ?? '').toString().trim();
+          if (k.isEmpty) continue;
+          out[k] = (item['value'] ?? '').toString();
+        }
+      }
+    }
+    return out;
+  }
+
+  HttpMethod _parseMethod(String raw) {
+    final upper = raw.toUpperCase();
+    return HttpMethod.values.firstWhere(
+      (m) => m.name == upper,
+      orElse: () => HttpMethod.GET,
+    );
+  }
+
+  /// Builds a [BodyDefinition] from the browser's body payload
+  /// (`{kind, raw, fields}`).
+  BodyDefinition? _bodyFromPayload(dynamic body) {
+    if (body is! Map) return null;
+    final kind = body['kind'] as String?;
+    if (kind == 'raw') {
+      final raw = (body['raw'] ?? '').toString();
+      if (raw.isEmpty) return null;
+      return BodyDefinition(contentType: BodyContentType.rawJson, rawBody: raw);
+    }
+    if (kind == 'formdata' || kind == 'urlencoded') {
+      final fields = _kvToMap(body['fields']);
+      if (fields.isEmpty) return null;
+      return BodyDefinition(
+        contentType: kind == 'urlencoded'
+            ? BodyContentType.urlEncoded
+            : BodyContentType.formData,
+        formFields: fields,
+      );
+    }
+    return null;
   }
 
   Future<void> _handleGenerate(HttpRequest req, String rawBody) async {

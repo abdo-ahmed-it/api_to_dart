@@ -63,7 +63,10 @@ class ServeCommand extends Command {
           defaultsTo: 'auto')
       ..addSeparator('Server options:')
       ..addOption('port',
-          abbr: 'p', help: 'Port for the local web UI.', defaultsTo: '4321');
+          abbr: 'p', help: 'Port for the local web UI.', defaultsTo: '4321')
+      ..addFlag('open',
+          help: 'Open the web UI in your default browser automatically.',
+          defaultsTo: true);
   }
 
   @override
@@ -179,6 +182,11 @@ class ServeCommand extends Command {
     stdout.writeln(TerminalUtils.gray('  Output → $outputDir'));
     stdout.writeln(TerminalUtils.gray('  Press Ctrl+C to stop.'));
 
+    final autoOpen = argResults!['open'] as bool;
+    if (autoOpen) {
+      await _openInBrowser(url, logger);
+    }
+
     // Stop cleanly on Ctrl+C.
     late final StreamSubscription sigint;
     sigint = ProcessSignal.sigint.watch().listen((_) async {
@@ -191,6 +199,24 @@ class ServeCommand extends Command {
 
     // Keep the process alive while the server runs.
     await Completer<void>().future;
+  }
+
+  /// Opens [url] in the OS default browser. Best-effort — a failure just leaves
+  /// the printed link for the user to click. Uses the platform's standard
+  /// opener (`open` on macOS, `xdg-open` on Linux, `start` on Windows).
+  Future<void> _openInBrowser(String url, Logger logger) async {
+    try {
+      if (Platform.isMacOS) {
+        await Process.run('open', [url]);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', [url]);
+      } else if (Platform.isWindows) {
+        // `start` is a cmd builtin, so it must run through cmd.
+        await Process.run('cmd', ['/c', 'start', '', url]);
+      }
+    } catch (_) {
+      // Non-fatal: the link is already printed above.
+    }
   }
 
   /// Date folder name (YYYY-MM-DD) used to group each run's output.

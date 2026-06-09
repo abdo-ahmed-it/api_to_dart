@@ -137,6 +137,47 @@ void main() {
       expect(resp.statusCode, 400);
       expect(jsonDecode(body)['error'], contains('No endpoints selected'));
     });
+
+    test('/api/endpoint returns editable detail for an index', () async {
+      final res = await _getJson('$base/api/endpoint?index=1');
+      expect(res['name'], 'List Users');
+      expect(res['method'], 'GET');
+      expect(res['path'], '/users');
+      expect(res['folderPath'], 'Users');
+      expect(res['headers'], isA<List>());
+      expect(res['queryParams'], isA<List>());
+      expect(res['auth'], isA<Map>());
+      expect(res['body'], isA<Map>());
+    });
+
+    test('/api/endpoint rejects an out-of-range index', () async {
+      final client = HttpClient();
+      final req = await client.getUrl(Uri.parse('$base/api/endpoint?index=99'));
+      final resp = await req.close();
+      await resp.drain();
+      client.close();
+      expect(resp.statusCode, 400);
+    });
+
+    test('/api/preview returns generated code for an index', () async {
+      final res = await _getJson('$base/api/preview?index=1');
+      expect(res['fileName'], endsWith('.dart'));
+      expect(res['code'], isA<String>());
+      // action mode → the code should reference ApiRequestAction
+      expect(res['code'], contains('Action'));
+    });
+
+    test('/api/try requires a URL', () async {
+      final client = HttpClient();
+      final req = await client.postUrl(Uri.parse('$base/api/try'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({'method': 'GET', 'url': ''}));
+      final resp = await req.close();
+      final body = await utf8.decoder.bind(resp).join();
+      client.close();
+      expect(resp.statusCode, 400);
+      expect(jsonDecode(body)['error'], contains('URL is required'));
+    });
   });
 }
 
