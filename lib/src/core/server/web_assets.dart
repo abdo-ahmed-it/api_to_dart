@@ -61,11 +61,15 @@ const String indexHtml = r'''<!DOCTYPE html>
   .mf.on.m-GET{background:#0e2a17}.mf.on.m-POST{background:#0c2336}
   .mf.on.m-PUT{background:#2a230c}.mf.on.m-PATCH{background:#2a1c0c}.mf.on.m-DELETE{background:#2a1212}
   .side-actions{display:flex;gap:7px;align-items:center}
+  .selall{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none;
+    color:var(--accent);font-size:12px;font-weight:600}
+  .selall input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
   .link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:2px 4px;font-weight:600}
   .tree{flex:1;overflow:auto;padding:6px 0}
   .folder-head{display:flex;align-items:center;gap:8px;padding:8px 14px;cursor:pointer;
     user-select:none;font-weight:600;font-size:12.5px;color:var(--muted)}
   .folder-head:hover{color:var(--ink)}
+  .folder-head .folder-box{width:14px;height:14px;accent-color:var(--accent);cursor:pointer;flex:0 0 auto}
   .folder-head .caret{font-size:10px;width:10px;transition:.15s}
   .folder-head.collapsed .caret{transform:rotate(-90deg)}
   .folder-head .fc{margin-left:auto;font-weight:400;font-size:11px;color:var(--faint)}
@@ -172,8 +176,7 @@ const String indexHtml = r'''<!DOCTYPE html>
       <input class="search" id="search" placeholder="Search endpoints…" autocomplete="off">
       <div class="filters" id="filters"></div>
       <div class="side-actions">
-        <button class="link" id="selectAll">Select all</button>
-        <button class="link" id="clearAll">Clear</button>
+        <label class="selall"><input type="checkbox" id="selectAllBox"><span id="selectAllLabel">Select all</span></label>
         <span class="fc" id="visCount" style="margin-left:auto;color:var(--faint);font-size:11px"></span>
       </div>
     </div>
@@ -288,6 +291,7 @@ function filtered(){
 function renderTree(){
   const eps=filtered();
   $('#visCount').textContent=`${eps.length} shown`;
+  syncMaster();
   const groups={};
   for(const ep of eps){const k=ep.folderPath||'(root)';(groups[k]||=[]).push(ep);}
   const tree=$('#tree');
@@ -295,7 +299,18 @@ function renderTree(){
   tree.innerHTML='';
   for(const [folder,list] of Object.entries(groups)){
     const f=document.createElement('div');
-    f.innerHTML=`<div class="folder-head"><span class="caret">▾</span><span>${esc(folder)}</span><span class="fc">${list.length}</span></div>`;
+    const idxs=list.map(ep=>ep.index);
+    f.innerHTML=`<div class="folder-head"><input type="checkbox" class="folder-box" title="Select all in this folder">`+
+      `<span class="caret">▾</span><span>${esc(folder)}</span><span class="fc">${list.length}</span></div>`;
+    const fbox=f.querySelector('.folder-box');
+    // toggling the folder box selects/deselects all rows inside it
+    fbox.onclick=e=>{
+      e.stopPropagation();
+      const on=e.target.checked;
+      idxs.forEach(i=>on?SELECTED.add(i):SELECTED.delete(i));
+      $$('.ep input',f).forEach(b=>b.checked=on);
+      updateSel();
+    };
     for(const ep of list){
       const row=document.createElement('div');
       row.className='ep'+(CUR===ep.index?' active':'');
@@ -305,11 +320,16 @@ function renderTree(){
         `<span class="method m-${ep.method}">${ep.method}</span>`+
         `<span class="nm" title="${esc(ep.path)}">${esc(ep.name)}</span>`+
         (ep.requiresAuth?`<span class="lock">🔒</span>`:``);
-      row.querySelector('input').onclick=e=>{e.stopPropagation();toggleSel(ep.index,e.target.checked);};
+      row.querySelector('input').onclick=e=>{
+        e.stopPropagation();
+        toggleSel(ep.index,e.target.checked);
+        syncFolderBox(fbox,idxs);
+      };
       row.onclick=()=>openEndpoint(ep.index);
       f.appendChild(row);
     }
-    f.querySelector('.folder-head').onclick=h=>{
+    syncFolderBox(fbox,idxs);
+    f.querySelector('.folder-head').onclick=()=>{
       const head=f.querySelector('.folder-head');head.classList.toggle('collapsed');
       $$('.ep',f).forEach(e=>e.classList.toggle('hidden'));
     };
@@ -317,14 +337,39 @@ function renderTree(){
   }
 }
 
+// Reflect a folder's selection state on its header checkbox:
+// checked = all in folder selected, indeterminate = some, empty = none.
+function syncFolderBox(box,idxs){
+  const sel=idxs.filter(i=>SELECTED.has(i)).length;
+  box.checked=idxs.length>0 && sel===idxs.length;
+  box.indeterminate=sel>0 && sel<idxs.length;
+}
+
 const SELECTED=new Set();
 function toggleSel(idx,on){on?SELECTED.add(idx):SELECTED.delete(idx);updateSel();}
 function updateSel(){
   $('#selInfo').textContent=`${SELECTED.size} selected`;
   $('#generate').disabled=SELECTED.size===0;
+  syncMaster();
 }
-$('#selectAll').onclick=()=>{filtered().forEach(ep=>SELECTED.add(ep.index));renderTree();updateSel();};
-$('#clearAll').onclick=()=>{SELECTED.clear();renderTree();updateSel();};
+// Reflect the visible selection state on the master checkbox:
+// checked = all visible selected, indeterminate = some, empty = none.
+function syncMaster(){
+  const box=$('#selectAllBox');if(!box)return;
+  const vis=filtered();
+  const sel=vis.filter(ep=>SELECTED.has(ep.index)).length;
+  box.checked=vis.length>0 && sel===vis.length;
+  box.indeterminate=sel>0 && sel<vis.length;
+  $('#selectAllLabel').textContent=box.checked?'Deselect all':'Select all';
+}
+// master checkbox: toggles all currently-visible (filtered) endpoints
+$('#selectAllBox').onclick=()=>{
+  const vis=filtered();
+  const allOn=vis.length>0 && vis.every(ep=>SELECTED.has(ep.index));
+  if(allOn)vis.forEach(ep=>SELECTED.delete(ep.index));
+  else vis.forEach(ep=>SELECTED.add(ep.index));
+  renderTree();updateSel();
+};
 $('#search').oninput=renderTree;
 
 // ---- endpoint detail / request builder ----
