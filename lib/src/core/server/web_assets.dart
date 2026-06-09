@@ -145,6 +145,17 @@ const String indexHtml = r'''<!DOCTYPE html>
   .authrow select,.authrow input{background:var(--panel);border:1px solid var(--line);color:var(--ink);
     border-radius:8px;padding:8px 11px;font-size:12.5px;outline:none}
   .authrow input{flex:1;font-family:monospace}
+  /* Output tab */
+  .out-grid{display:flex;flex-direction:column;gap:12px;max-width:560px}
+  .out-field{display:flex;align-items:center;gap:12px;position:relative}
+  .out-field>span{width:110px;flex:0 0 auto;color:var(--muted);font-size:12.5px}
+  .out-field input,.out-field select{flex:1;background:var(--panel);border:1px solid var(--line);
+    color:var(--ink);border-radius:8px;padding:8px 11px;font-size:12.5px;font-family:monospace;outline:none}
+  .out-field input:focus,.out-field select:focus{border-color:var(--accent)}
+  .out-apply{flex:0 0 auto;font-size:11px}
+  .out-hint{margin-top:14px;font-size:12px;color:var(--faint);font-family:monospace;line-height:1.7;
+    background:var(--code);border:1px solid var(--line);border-radius:8px;padding:11px 13px}
+  .out-hint b{color:var(--accent)}
   pre.code{background:var(--code);border:1px solid var(--line);border-radius:9px;padding:14px 16px;
     font-family:"SF Mono",Menlo,monospace;font-size:12.5px;line-height:1.65;color:#cbd5e1;
     overflow:auto;white-space:pre;max-height:100%}
@@ -290,6 +301,7 @@ const String indexHtml = r'''<!DOCTYPE html>
         <div class="tab" data-pane="headers">Headers <span class="badge" id="bHeaders">0</span></div>
         <div class="tab" data-pane="body">Body</div>
         <div class="tab" data-pane="auth">Auth</div>
+        <div class="tab" data-pane="output">Output</div>
         <div class="tab" data-pane="code">Code</div>
       </div>
       <div class="tabwrap">
@@ -318,6 +330,37 @@ const String indexHtml = r'''<!DOCTYPE html>
             <input id="authToken" placeholder="token / value" class="hidden">
           </div>
           <div class="epdesc" style="padding:0">Auth is sent as a header when you press Send.</div>
+        </div>
+        <div class="pane" id="pane-output">
+          <div class="out-grid">
+            <label class="out-field">
+              <span>Output dir</span>
+              <input id="outDir" placeholder="(default)">
+              <button class="link out-apply" id="outApplyDir" type="button">apply to all</button>
+            </label>
+            <label class="out-field">
+              <span>File name</span>
+              <input id="outFile" placeholder="(default)">
+            </label>
+            <label class="out-field">
+              <span>Action class</span>
+              <input id="outAction" placeholder="(default)">
+            </label>
+            <label class="out-field">
+              <span>Response class</span>
+              <input id="outResponse" placeholder="(default)">
+            </label>
+            <label class="out-field">
+              <span>Mode</span>
+              <select id="outMode">
+                <option value="default">Default</option>
+                <option value="auto">Auto (detect api_request)</option>
+                <option value="action">Action + Response</option>
+                <option value="response-only">Response only</option>
+              </select>
+            </label>
+          </div>
+          <div class="out-hint" id="outHint"></div>
         </div>
         <div class="pane" id="pane-code">
           <div class="codehead"><span class="fn" id="codeFile"></span>
@@ -534,11 +577,24 @@ const EDITS={};
 // Snapshots the current builder form into EDITS[CUR].
 function captureEdits(){
   if(CUR==null)return;
+  const prev=EDITS[CUR]||{};
   EDITS[CUR]={
     method:$('#mMethod').value, url:$('#mUrl').value,
     params:collectKv('#pane-params'), headers:collectKv('#pane-headers'),
     body:currentBody(), authType:$('#authType').value, authToken:$('#authToken').value,
+    authHeaderName:prev.authHeaderName, name:prev.name, description:prev.description,
+    output:currentOutput(), defaults:prev.defaults,
   };
+}
+// Reads the Output tab into a settings record (blank fields omitted).
+function currentOutput(){
+  const o={};
+  const dir=$('#outDir').value.trim(); if(dir)o.outputDir=dir;
+  const f=$('#outFile').value.trim(); if(f)o.fileName=f;
+  const a=$('#outAction').value.trim(); if(a)o.actionClass=a;
+  const r=$('#outResponse').value.trim(); if(r)o.responseClass=r;
+  const m=$('#outMode').value; if(m&&m!=='default')o.mode=m;
+  return o;
 }
 
 async function openEndpoint(idx){
@@ -549,8 +605,10 @@ async function openEndpoint(idx){
   $('#builder').classList.remove('hidden');
   closeDrawer();  // on mobile, reveal the builder after picking
 
-  // Use cached edits if we have them; otherwise fetch fresh detail.
-  let d=EDITS[idx];
+  // Use cached edits only if they're a full snapshot (have request fields);
+  // an output-only stub (from "apply to all") still needs a fetch.
+  let d=(EDITS[idx]&&EDITS[idx].method)?EDITS[idx]:null;
+  const stubOutput=(!d&&EDITS[idx]&&EDITS[idx].output)?EDITS[idx].output:null;
   let isEdit=!!d;
   if(!d){
     // show a loading state while fetching detail
@@ -564,8 +622,13 @@ async function openEndpoint(idx){
        body:{kind:r.body.kind||'none',raw:r.body.raw||'',fields:r.body.fields||[]},
        authType:r.auth.type||'none',authToken:r.auth.token||'',
        authHeaderName:(r.auth&&r.auth.headerName)||null,
-       name:r.name,description:r.description};
+       name:r.name,description:r.description,
+       output:{...(r.output&&{outputDir:r.output.outputDir,fileName:r.output.fileName,
+         actionClass:r.output.actionClass,responseClass:r.output.responseClass,
+         mode:r.output.mode==='default'?undefined:r.output.mode}),...(stubOutput||{})},
+       defaults:(r.output&&r.output.defaults)||{}};
     EP_BY_INDEX[idx]._detail=d;  // remember name/desc for header
+    EDITS[idx]=d;  // promote to a full snapshot
   }
   AUTH_HEADER_NAME=d.authHeaderName||null;
   const meta=EP_BY_INDEX[idx]._detail||d;
@@ -585,11 +648,50 @@ async function openEndpoint(idx){
   $('#authType').value=d.authType||'none';
   $('#authToken').value=d.authToken||'';
   syncAuthUI();
+  // output tab — fill values + placeholders from defaults
+  const o=d.output||{}, def=(EP_BY_INDEX[idx]._detail&&EP_BY_INDEX[idx]._detail.defaults)||d.defaults||{};
+  $('#outDir').value=o.outputDir||''; $('#outDir').placeholder=def.outputDir||'(default)';
+  $('#outFile').value=o.fileName||''; $('#outFile').placeholder=def.fileName||'(default)';
+  $('#outAction').value=o.actionClass||''; $('#outAction').placeholder=def.actionClass||'(default)';
+  $('#outResponse').value=o.responseClass||''; $('#outResponse').placeholder=def.responseClass||'(default)';
+  $('#outMode').value=o.mode||'default';
+  updateOutHint();
   // reset code/preview lazily
   $('#codeBox').textContent='Select the Code tab to preview…';
   switchTab('params');
   if(isEdit)markDirty();
 }
+// Live hint showing the effective file path + class names.
+function updateOutHint(){
+  const idx=CUR; if(idx==null)return;
+  const def=(EP_BY_INDEX[idx]&&EP_BY_INDEX[idx]._detail&&EP_BY_INDEX[idx]._detail.defaults)||{};
+  const o=currentOutput();
+  const dir=o.outputDir||def.outputDir||'';
+  const file=o.fileName||def.fileName||'';
+  const act=o.actionClass||def.actionClass||'';
+  const resp=o.responseClass||def.responseClass||'';
+  $('#outHint').innerHTML=
+    `Will write → <b>${esc(dir)}/${esc(file)}</b><br>`+
+    `Action: <b>${esc(act)}</b> · Response: <b>${esc(resp)}</b>`;
+}
+// Output fields refresh the hint + mark dirty as the user types.
+['#outDir','#outFile','#outAction','#outResponse'].forEach(s=>{
+  const el=$(s);if(el)el.addEventListener('input',()=>{updateOutHint();markDirty();});
+});
+$('#outMode').addEventListener('change',()=>{updateOutHint();markDirty();});
+// "apply to all": copy this endpoint's output dir into every endpoint's edits.
+$('#outApplyDir').onclick=()=>{
+  const dir=$('#outDir').value.trim();
+  captureEdits();
+  for(const i of Object.keys(EP_BY_INDEX)){
+    const e=EDITS[i]||(EDITS[i]={});
+    e.output=e.output||{};
+    if(dir)e.output.outputDir=dir; else delete e.output.outputDir;
+  }
+  $('#outApplyDir').textContent='applied ✓';
+  setTimeout(()=>{$('#outApplyDir').textContent='apply to all';},1200);
+};
+
 // small "edited" indicator next to the endpoint name
 function markDirty(){
   if(CUR!=null && !$('#dirtyTag')){
@@ -663,8 +765,11 @@ async function loadPreview(){
   if(CUR==null)return;
   $('#codeFile').textContent='';
   $('#codeBox').textContent='Generating…';
+  // include the in-flight Output overrides so the preview reflects edits
+  const o=currentOutput();
+  const qs=Object.entries(o).map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('&');
   try{
-    const d=await jget('/api/preview?index='+CUR);
+    const d=await jget('/api/preview?index='+CUR+(qs?'&'+qs:''));
     $('#codeFile').textContent=d.fileName||'';
     $('#codeBox').textContent=d.code||'// (no code)';
   }catch(e){
@@ -765,12 +870,25 @@ $$('.rtab').forEach(t=>t.onclick=()=>switchRespTab(t.dataset.rt));
 $('#respExpand').onclick=()=>$('#resp').classList.toggle('expanded');
 $('#respClose').onclick=()=>$('#resp').classList.add('hidden');
 
+// Endpoint key ("<METHOD> <path>") matching the server's ApiEndpoint.key.
+function epKey(i){const e=EP_BY_INDEX[i];return e?`${e.method} ${e.path}`:null;}
+// Builds the per-endpoint output settings map for selected endpoints.
+function buildSettingsPayload(){
+  captureEdits();  // flush the currently-open endpoint's Output edits
+  const out={};
+  for(const i of SELECTED){
+    const o=(EDITS[i]&&EDITS[i].output)||{};
+    if(Object.keys(o).length){const k=epKey(i);if(k)out[k]=o;}
+  }
+  return out;
+}
+
 // ---- generate selected ----
 $('#generate').onclick=async()=>{
   if(!SELECTED.size)return;
   const btn=$('#generate');btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Generating…';
   try{
-    const d=await jpost('/api/generate',{selectedIndexes:[...SELECTED]});
+    const d=await jpost('/api/generate',{selectedIndexes:[...SELECTED],settings:buildSettingsPayload()});
     showGenResults(d);
   }catch(e){showGenResults({error:String(e)});}
   finally{btn.disabled=false;btn.textContent='Generate selected';updateSel();}

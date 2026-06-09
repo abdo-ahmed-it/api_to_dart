@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import '../generation/code_emitter.dart';
+import '../generation/pubspec_inspector.dart';
 import '../logger/logger.dart';
 import '../models/api_endpoint.dart';
 import '../models/api_folder.dart';
@@ -13,7 +14,55 @@ import '../models/endpoint_tree.dart';
 import '../models/response_definition.dart';
 import '../resolution/http_client.dart';
 import '../resolution/response_resolver.dart';
+import '../sources/api_fetchers/config_storage.dart';
 import 'web_assets.dart';
+
+/// Per-endpoint output overrides edited in the web UI's Output tab. All fields
+/// are optional — a blank field means "use the derived default".
+class OutputSettings {
+  final String? outputDir; // override the dir (verbatim, no date appended)
+  final String? fileName; // bare file name, e.g. "user.dart"
+  final String? actionClass;
+  final String? responseClass;
+  final String? mode; // 'auto' | 'action' | 'response-only'
+
+  const OutputSettings({
+    this.outputDir,
+    this.fileName,
+    this.actionClass,
+    this.responseClass,
+    this.mode,
+  });
+
+  factory OutputSettings.fromJson(Map<String, dynamic> j) => OutputSettings(
+        outputDir: _s(j['outputDir']),
+        fileName: _s(j['fileName']),
+        actionClass: _s(j['actionClass']),
+        responseClass: _s(j['responseClass']),
+        mode: _s(j['mode']),
+      );
+
+  Map<String, dynamic> toJson() => {
+        if (outputDir != null) 'outputDir': outputDir,
+        if (fileName != null) 'fileName': fileName,
+        if (actionClass != null) 'actionClass': actionClass,
+        if (responseClass != null) 'responseClass': responseClass,
+        if (mode != null) 'mode': mode,
+      };
+
+  bool get isEmpty =>
+      outputDir == null &&
+      fileName == null &&
+      actionClass == null &&
+      responseClass == null &&
+      mode == null;
+
+  static String? _s(dynamic v) {
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+}
 
 /// A local, loopback-only web UI for selecting endpoints and generating code.
 ///
@@ -39,6 +88,14 @@ class ApiWebServer {
 
   HttpServer? _server;
 
+  /// Per-endpoint output overrides, keyed by [ApiEndpoint.key]. Loaded from
+  /// `.api2dart/config.yaml` on first use and re-saved after each generate.
+  final Map<String, OutputSettings> _settings = {};
+  bool _settingsLoaded = false;
+
+  /// Config key holding the JSON-encoded per-endpoint output overrides.
+  static const String _settingsKey = 'wizard.output_overrides';
+
   ApiWebServer({
     required this.tree,
     required this.outputDir,
@@ -49,6 +106,103 @@ class ApiWebServer {
     required this.logger,
   })  : _ordered = tree.allEndpoints,
         _folderPaths = _buildFolderPaths(tree);
+
+  /// Lazily loads saved overrides from config (JSON string under one key).
+  Map<String, OutputSettings> get _savedSettings {
+    if (!_settingsLoaded) {
+      _settingsLoaded = true;
+      final raw = ConfigStorage.get(_settingsKey);
+      if (raw != null && raw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(raw) as Map<String, dynamic>;
+          decoded.forEach((k, v) {
+            if (v is Map<String, dynamic>) {
+              _settings[k] = OutputSettings.fromJson(v);
+            }
+          });
+        } catch (_) {/* ignore corrupt config */}
+      }
+    }
+    return _settings;
+  }
+
+  void _persistSettings() {
+    final map = <String, dynamic>{};
+    _savedSettings.forEach((k, s) {
+      if (!s.isEmpty) map[k] = s.toJson();
+    });
+    try {
+      ConfigStorage.set(_settingsKey, jsonEncode(map));
+    } catch (_) {/* best-effort */}
+  }
+
+  /// Returns the effective output settings for an endpoint, merging any saved
+  /// overrides with the server defaults.
+  OutputSettings _effectiveSettings(ApiEndpoint ep) =>
+      _savedSettings[ep.key] ?? const OutputSettings();
+
+  /// Resolves [s.mode] (or the server default) into the action-vs-response
+  /// boolean, matching the CLI's `auto` behavior.
+  bool _generateActionFor(OutputSettings s) {
+    switch (s.mode) {
+      case 'action':
+        return true;
+      case 'response-only':
+        return false;
+      case 'auto':
+        return PubspecInspector.hasApiRequestDependency();
+      default:
+        return generateAction; // server default (already resolved)
+    }
+  }
+
+  /// The directory an endpoint writes to: its override (verbatim) or the
+  /// server's default dated dir.
+  String _outputDirFor(OutputSettings s) =>
+      (s.outputDir?.isNotEmpty == true) ? s.outputDir! : outputDir;
+
+  /// Applies name overrides to a copy of [ep] so the emitter/preview use them.
+  ApiEndpoint _withOverrides(ApiEndpoint ep, OutputSettings s) {
+    if (s.fileName == null &&
+        s.actionClass == null &&
+        s.responseClass == null) {
+      return ep;
+    }
+    return ApiEndpoint(
+      name: ep.name,
+      path: ep.path,
+      method: ep.method,
+      description: ep.description,
+      body: ep.body,
+      headers: ep.headers,
+      queryParams: ep.queryParams,
+      auth: ep.auth,
+      response: ep.response,
+      baseUrlOverride: ep.baseUrlOverride,
+      fileNameOverride: _sanitizeFile(s.fileName),
+      actionClassOverride: _sanitizeClass(s.actionClass),
+      responseClassOverride: _sanitizeClass(s.responseClass),
+    );
+  }
+
+  /// Sanitizes a class name to a valid Dart-ish PascalCase identifier; returns
+  /// null when blank (caller falls back to the derived default).
+  static String? _sanitizeClass(String? v) {
+    if (v == null) return null;
+    final cleaned = v.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+    if (cleaned.isEmpty) return null;
+    final head = RegExp(r'^[a-zA-Z]').hasMatch(cleaned) ? cleaned : 'C$cleaned';
+    return head[0].toUpperCase() + head.substring(1);
+  }
+
+  /// Ensures a file name ends in `.dart`; returns null when blank.
+  static String? _sanitizeFile(String? v) {
+    if (v == null) return null;
+    var name = v.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_./-]'), '_');
+    if (name.isEmpty) return null;
+    if (!name.endsWith('.dart')) name = '$name.dart';
+    return name;
+  }
 
   /// Builds folder labels in the SAME order as [EndpointTree.allEndpoints]
   /// (root endpoints first, then a depth-first walk of folders), so the index
@@ -175,6 +329,7 @@ class ApiWebServer {
       }
     }
 
+    final s = _effectiveSettings(ep);
     _json(req, 200, {
       'index': idx,
       'name': ep.name,
@@ -196,26 +351,56 @@ class ApiWebServer {
         'fields': formFields,
       },
       'responsePreview': ep.response?.jsonBody,
+      // Output tab: current saved overrides (may be blank) + derived defaults
+      // so the UI can show placeholders.
+      'output': {
+        'outputDir': s.outputDir ?? '',
+        'fileName': s.fileName ?? '',
+        'actionClass': s.actionClass ?? '',
+        'responseClass': s.responseClass ?? '',
+        'mode': s.mode ?? 'default',
+        'defaults': {
+          'outputDir': outputDir,
+          'fileName': ep.fileName,
+          'actionClass': ep.actionClassName,
+          'responseClass': ep.responseClassName,
+          'mode': generateAction ? 'action' : 'response-only',
+        },
+      },
     });
   }
 
   /// The generated Dart code for one endpoint, without writing to disk — uses
-  /// the same [CodeEmitter.generateCode] the disk path uses.
+  /// the same [CodeEmitter.generateCode] the disk path uses. Honors in-flight
+  /// Output-tab overrides passed as query params so the preview updates live.
   void _handlePreview(HttpRequest req) {
     final idx = _indexParam(req);
     if (idx == null) return;
-    final ep = _ordered[idx];
+    final base = _ordered[idx];
+
+    // Live overrides from the Output tab (fall back to saved settings).
+    final q = req.uri.queryParameters;
+    final saved = _effectiveSettings(base);
+    final s = OutputSettings(
+      outputDir: q['outputDir'] ?? saved.outputDir,
+      fileName: q['fileName'] ?? saved.fileName,
+      actionClass: q['actionClass'] ?? saved.actionClass,
+      responseClass: q['responseClass'] ?? saved.responseClass,
+      mode: q['mode'] ?? saved.mode,
+    );
+    final ep = _withOverrides(base, s);
+    final genAction = _generateActionFor(s);
 
     final emitter = CodeEmitter(logger: logger);
     final code = emitter.generateCode(
       endpoint: ep,
       response: ep.response,
-      generateAction: generateAction,
+      generateAction: genAction,
     );
 
     _json(req, 200, {
       'index': idx,
-      'fileName': generateAction
+      'fileName': genAction
           ? ep.fileName
           : ep.fileName.replaceAll('_action.dart', '_response.dart'),
       'code': code ??
@@ -405,12 +590,16 @@ class ApiWebServer {
 
   Future<void> _handleGenerate(HttpRequest req, String rawBody) async {
     final List<int> indexes;
+    Map<String, dynamic> settingsJson = const {};
     try {
       final decoded = jsonDecode(rawBody) as Map<String, dynamic>;
       indexes = (decoded['selectedIndexes'] as List)
           .map((e) => (e as num).toInt())
           .where((i) => i >= 0 && i < _ordered.length)
           .toList();
+      if (decoded['settings'] is Map<String, dynamic>) {
+        settingsJson = decoded['settings'] as Map<String, dynamic>;
+      }
     } catch (e) {
       _json(req, 400, {'error': 'Invalid request body: $e'});
       return;
@@ -421,19 +610,34 @@ class ApiWebServer {
       return;
     }
 
+    // Merge incoming per-endpoint settings over the saved ones, then persist.
+    settingsJson.forEach((k, v) {
+      if (v is Map<String, dynamic>) {
+        final s = OutputSettings.fromJson(v);
+        if (s.isEmpty) {
+          _savedSettings.remove(k);
+        } else {
+          _savedSettings[k] = s;
+        }
+      }
+    });
+    _persistSettings();
+
     final buffer = _BufferingLogger(logger);
     final httpClient = ApiHttpClient(logger: buffer);
     final resolver = ResponseResolver(httpClient: httpClient);
     final emitter = CodeEmitter(logger: buffer);
 
     final defaultBaseUrl = baseUrl ?? '';
-    final endpointResponses = <ApiEndpoint, ResponseDefinition?>{};
+    // Each resolved endpoint, paired with its response + effective output opts.
+    final pending = <_PendingEmit>[];
     final generated = <Map<String, dynamic>>[];
     final skipped = <Map<String, dynamic>>[];
 
     for (final i in indexes) {
-      final endpoint = _ordered[i];
-      // Per-endpoint base URL (Apidog URL-variable override) when present.
+      final raw = _ordered[i];
+      final s = _effectiveSettings(raw);
+      final endpoint = _withOverrides(raw, s);
       final resolvedBaseUrl = endpoint.baseUrlOverride ?? defaultBaseUrl;
       buffer.i('Processing ${endpoint.method.name} ${endpoint.path}...');
 
@@ -465,25 +669,23 @@ class ApiWebServer {
         continue;
       }
 
-      endpointResponses[endpoint] = result.response;
+      pending.add(_PendingEmit(endpoint, result.response, s));
     }
 
-    // Emit one endpoint at a time so we can report the file path per endpoint.
-    for (final entry in endpointResponses.entries) {
+    // Emit one endpoint at a time, each to its own dir/mode, so we can report
+    // the file path per endpoint.
+    for (final p in pending) {
       final filePath = emitter.emit(
-        endpoint: entry.key,
-        outputDir: outputDir,
-        response: entry.value,
-        generateAction: generateAction,
+        endpoint: p.endpoint,
+        outputDir: _outputDirFor(p.settings),
+        response: p.response,
+        generateAction: _generateActionFor(p.settings),
       );
       if (filePath != null) {
-        generated.add({
-          'file': filePath,
-          'status': 200,
-        });
+        generated.add({'file': filePath, 'status': 200});
       } else {
         skipped.add({
-          'name': entry.key.name,
+          'name': p.endpoint.name,
           'reason': 'nothing to generate (no response data)',
         });
       }
@@ -505,6 +707,15 @@ class ApiWebServer {
       ..write(jsonEncode(body));
     req.response.close();
   }
+}
+
+/// One endpoint ready to emit, carrying its resolved response and effective
+/// output settings so each writes to its own dir/name/mode.
+class _PendingEmit {
+  final ApiEndpoint endpoint;
+  final ResponseDefinition? response;
+  final OutputSettings settings;
+  _PendingEmit(this.endpoint, this.response, this.settings);
 }
 
 /// A [Logger] that mirrors messages to an underlying logger (terminal) while

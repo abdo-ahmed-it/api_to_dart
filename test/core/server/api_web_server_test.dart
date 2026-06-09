@@ -174,6 +174,35 @@ void main() {
       expect(res['code'], contains('Action'));
     });
 
+    test('/api/endpoint exposes output settings with derived defaults',
+        () async {
+      final res = await _getJson('$base/api/endpoint?index=1');
+      final out = res['output'] as Map;
+      // no saved overrides yet → blank current values
+      expect(out['fileName'], '');
+      expect(out['actionClass'], '');
+      // derived defaults are present for prefill
+      final defs = out['defaults'] as Map;
+      expect(defs['fileName'], 'get_list_users_action.dart');
+      expect(defs['actionClass'], 'GetListUsersAction');
+      expect(defs['responseClass'], 'GetListUsersResponse');
+    });
+
+    test('/api/preview honors live class/file overrides', () async {
+      final res = await _getJson(
+          '$base/api/preview?index=1&actionClass=MyUsersAction&fileName=my_users');
+      expect(res['fileName'], 'my_users.dart');
+      expect(res['code'], contains('class MyUsersAction'));
+      expect(res['code'], isNot(contains('class GetListUsersAction')));
+    });
+
+    test('/api/preview mode=response-only drops the action import', () async {
+      final res =
+          await _getJson('$base/api/preview?index=1&mode=response-only');
+      expect(res['fileName'], endsWith('_response.dart'));
+      expect(res['code'], isNot(contains('ApiRequestAction')));
+    });
+
     test('/api/try requires a URL', () async {
       final client = HttpClient();
       final req = await client.postUrl(Uri.parse('$base/api/try'));

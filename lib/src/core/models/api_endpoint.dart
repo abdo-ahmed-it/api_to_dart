@@ -20,6 +20,13 @@ class ApiEndpoint {
   /// default base URL. When null, the caller's default base URL applies.
   final String? baseUrlOverride;
 
+  /// Per-endpoint output overrides, set from the web UI's Output tab. When null
+  /// the derived defaults apply. [fileNameOverride] is the bare file name
+  /// (e.g. `user.dart`); the others are class names.
+  final String? fileNameOverride;
+  final String? actionClassOverride;
+  final String? responseClassOverride;
+
   const ApiEndpoint({
     required this.name,
     required this.path,
@@ -31,7 +38,14 @@ class ApiEndpoint {
     this.auth = const AuthDefinition(type: AuthType.none),
     this.response,
     this.baseUrlOverride,
+    this.fileNameOverride,
+    this.actionClassOverride,
+    this.responseClassOverride,
   });
+
+  /// Stable identifier for persisting per-endpoint settings across runs —
+  /// independent of array position. `"<METHOD> <path>"`.
+  String get key => '${method.name} $path';
 
   /// PascalCase name stripped of non-alphanumeric chars, prefixed with the
   /// HTTP method so endpoints sharing a path (e.g. `GET /users` and
@@ -51,11 +65,16 @@ class ApiEndpoint {
     return '$methodPart$base';
   }
 
-  String get actionClassName => '${_cleanName}Action';
+  String get actionClassName => actionClassOverride?.isNotEmpty == true
+      ? actionClassOverride!
+      : '${_cleanName}Action';
 
-  String get responseClassName => '${_cleanName}Response';
+  String get responseClassName => responseClassOverride?.isNotEmpty == true
+      ? responseClassOverride!
+      : '${_cleanName}Response';
 
   String get fileName {
+    if (fileNameOverride?.isNotEmpty == true) return fileNameOverride!;
     // Convert PascalCase to snake_case
     final snake = _cleanName
         .replaceAllMapped(
