@@ -13,6 +13,7 @@ import '../../core/models/response_definition.dart';
 import '../../core/resolution/http_client.dart';
 import '../../core/resolution/response_resolver.dart';
 import '../../core/server/api_web_server.dart';
+import '../../core/server/browser_token_capture.dart';
 import '../../core/sources/api_fetchers/apidog_fetcher.dart';
 import '../../core/sources/api_fetchers/config_storage.dart';
 import '../../core/sources/api_fetchers/postman_fetcher.dart';
@@ -374,18 +375,52 @@ class GenerateWizard {
     return vars;
   }
 
+  // ── Sign in (token capture) ─────────────────────────────────────────
+
+  /// Acquires a provider token via the browser-based guided-paste flow, with a
+  /// graceful fallback to a plain terminal prompt.
+  ///
+  /// Neither Apidog nor Postman exposes an OAuth / device-flow login, so the
+  /// user must create the token on the provider's page either way. The browser
+  /// flow opens that page for them and captures the pasted token automatically
+  /// (no terminal paste). If the local capture server can't start or the user
+  /// times out, we fall back to the classic terminal prompt so the wizard
+  /// always works (e.g. headless/CI, no browser).
+  Future<String?> _signIn({
+    required String providerName,
+    required String tokenPageUrl,
+    required String terminalPrompt,
+    List<String>? steps,
+  }) async {
+    final captured = await BrowserTokenCapture(logger: _logger).captureToken(
+      providerName: providerName,
+      tokenPageUrl: tokenPageUrl,
+      steps: steps,
+    );
+    if (captured != null && captured.isNotEmpty) return captured;
+
+    // Fallback: classic terminal prompt.
+    stdout.writeln('');
+    stdout.writeln(TerminalUtils.gray('  Get your token from: $tokenPageUrl'));
+    stdout.writeln('');
+    return promptInput(message: terminalPrompt);
+  }
+
   // ── Postman API ─────────────────────────────────────────────────────
 
   Future<_LoadResult?> _loadFromPostmanApi() async {
     var apiKey = ConfigStorage.get('postman.api_key');
 
     if (apiKey == null || apiKey.isEmpty) {
-      stdout.writeln('');
-      stdout.writeln(TerminalUtils.gray(
-          '  Get your API key from: https://postman.co/settings/me/api-keys'));
-      stdout.writeln('');
-
-      apiKey = promptInput(message: 'Postman API Key');
+      apiKey = await _signIn(
+        providerName: 'Postman',
+        tokenPageUrl: 'https://postman.co/settings/me/api-keys',
+        terminalPrompt: 'Postman API Key',
+        steps: [
+          'On the API keys page, click <strong>Generate API Key</strong>.',
+          'Name it, then copy the generated key.',
+        ],
+      );
       if (apiKey == null || apiKey.isEmpty) return null;
 
       ConfigStorage.set('postman.api_key', apiKey);
@@ -536,12 +571,17 @@ class GenerateWizard {
     var token = ConfigStorage.get('apidog.token');
 
     if (token == null || token.isEmpty) {
-      stdout.writeln('');
-      stdout.writeln(TerminalUtils.gray(
-          '  Get your token from: https://app.apidog.com/settings/api-access-token'));
-      stdout.writeln('');
-
-      token = promptInput(message: 'Apidog API Token');
+      token = await _signIn(
+        providerName: 'Apidog',
+        tokenPageUrl: 'https://app.apidog.com/',
+        terminalPrompt: 'Apidog API Token',
+        steps: [
+          'Click your avatar (top-right) → <strong>Account Settings</strong>.',
+          'Open <strong>API Access Token</strong> → '
+              '<strong>Create a new personal token</strong>.',
+          'Name it, pick a validity, then copy the token (shown once).',
+        ],
+      );
       if (token == null || token.isEmpty) return null;
 
       ConfigStorage.set('apidog.token', token);
