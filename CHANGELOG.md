@@ -1,3 +1,16 @@
+## 0.4.0
+
+### Added
+- New `api2dart resend <log-file.md>` command. Every generated request log now
+  ends with a `## Resend` section and a hidden machine-readable request block.
+  Running `resend` on a log file replays the exact request (method, URL,
+  headers, query, body) and overwrites the same file in place with the fresh
+  status, response and timing. The file stays replayable indefinitely. The
+  human-facing `## cURL` snippet is preserved for manual copy/paste.
+  - On a failed request (no response), the file is left unchanged.
+  - Older log files without the metadata block report a clear error pointing
+    the user to re-run `generate`.
+
 ## 0.3.2
 
 ### Fixed
