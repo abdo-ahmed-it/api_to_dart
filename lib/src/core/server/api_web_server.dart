@@ -273,25 +273,51 @@ class ApiWebServer {
     });
   }
 
+  /// Serializes the FULL nested tree (folders → subfolders → endpoints),
+  /// assigning each endpoint a stable `index` in the SAME order as
+  /// [EndpointTree.allEndpoints] (root endpoints first, then each folder's
+  /// endpoints, then its subfolders — depth-first). This mirrors the terminal
+  /// selector's tree exactly so the browser can render the same hierarchy.
   Map<String, dynamic> _treeJson() {
-    final endpoints = <Map<String, dynamic>>[];
+    // The flat list is already in allEndpoints order; map identity → index.
+    final indexOf = <ApiEndpoint, int>{};
     for (var i = 0; i < _ordered.length; i++) {
-      final ep = _ordered[i];
-      endpoints.add({
-        'index': i,
-        'name': ep.name,
-        'method': ep.method.name,
-        'path': ep.path,
-        'folderPath': _folderPaths[i],
-        'requiresAuth': ep.requiresAuth,
-      });
+      indexOf[_ordered[i]] = i;
     }
+
+    Map<String, dynamic> endpointNode(ApiEndpoint ep) => {
+          'type': 'endpoint',
+          'index': indexOf[ep],
+          'name': ep.name,
+          'method': ep.method.name,
+          'path': ep.path,
+          'requiresAuth': ep.requiresAuth,
+        };
+
+    Map<String, dynamic> folderNode(ApiFolder f) => {
+          'type': 'folder',
+          'name': f.name,
+          'count': f.totalEndpoints,
+          // Match allEndpoints order within a folder: own endpoints first,
+          // then subfolders.
+          'children': [
+            ...f.endpoints.map(endpointNode),
+            ...f.subfolders.map(folderNode),
+          ],
+        };
+
+    final roots = <Map<String, dynamic>>[
+      ...tree.rootEndpoints.map(endpointNode),
+      ...tree.folders.map(folderNode),
+    ];
+
     return {
       'sourceName': tree.sourceName,
       'mode': generateAction ? 'action + response' : 'response-only',
       'outputDir': outputDir,
       'baseUrl': baseUrl ?? '',
-      'endpoints': endpoints,
+      'total': _ordered.length,
+      'roots': roots,
     };
   }
 

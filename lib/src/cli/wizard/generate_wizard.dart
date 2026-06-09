@@ -163,7 +163,11 @@ class GenerateWizard {
       // the main isolate on synchronous key reads, so an in-process server
       // would never get a chance to answer the browser. A separate isolate
       // keeps the web UI responsive.
-      final url = await spawnWebServerIsolate(
+      //
+      // Try the friendly default port first; if it's busy (e.g. another run is
+      // still up), fall back to an OS-assigned free port so the link always
+      // appears rather than silently disappearing.
+      var url = await spawnWebServerIsolate(
         tree: tree,
         outputDir: outputDir,
         logsDir: logsDir,
@@ -171,6 +175,15 @@ class GenerateWizard {
         token: token,
         generateAction: generateAction,
         port: 4321,
+      );
+      url ??= await spawnWebServerIsolate(
+        tree: tree,
+        outputDir: outputDir,
+        logsDir: logsDir,
+        baseUrl: baseUrl,
+        token: token,
+        generateAction: generateAction,
+        port: 0,
       );
       if (url == null) return false;
 

@@ -73,35 +73,42 @@ void main() {
       expect(base, startsWith('http://127.0.0.1:'));
     });
 
-    test('serves endpoints with stable indexes matching allEndpoints order',
+    test('serves a nested tree with stable indexes matching allEndpoints order',
         () async {
       final res = await _getJson('$base/api/tree');
       expect(res['sourceName'], 'Test API');
       expect(res['mode'], 'action + response');
       expect(res['outputDir'], 'out/actions');
+      expect(res['total'], 4);
 
-      final endpoints = (res['endpoints'] as List).cast<Map>();
-      expect(endpoints.length, 4);
-
-      // Index order must equal EndpointTree.allEndpoints:
-      // root first, then folder endpoints, then nested subfolder endpoints.
+      // Flatten the nested tree depth-first (endpoints before subfolders within
+      // a folder) — must match EndpointTree.allEndpoints order exactly.
+      final flat = _flattenEndpoints(res['roots'] as List);
       final allEndpoints = tree.allEndpoints;
-      for (var i = 0; i < endpoints.length; i++) {
-        expect(endpoints[i]['index'], i);
-        expect(endpoints[i]['name'], allEndpoints[i].name);
-        expect(endpoints[i]['method'], allEndpoints[i].method.name);
+      expect(flat.length, allEndpoints.length);
+      for (var i = 0; i < flat.length; i++) {
+        expect(flat[i]['index'], i);
+        expect(flat[i]['name'], allEndpoints[i].name);
+        expect(flat[i]['method'], allEndpoints[i].method.name);
       }
     });
 
-    test('reports folder paths including nested labels', () async {
+    test('nests subfolders inside their parent folder', () async {
       final res = await _getJson('$base/api/tree');
-      final endpoints = (res['endpoints'] as List).cast<Map>();
+      final roots = (res['roots'] as List).cast<Map>();
 
-      final byName = {for (final e in endpoints) e['name']: e['folderPath']};
-      expect(byName['Root One'], '');
-      expect(byName['List Users'], 'Users');
-      expect(byName['Create User'], 'Users');
-      expect(byName['Ban User'], 'Users / Admin');
+      // Root has: one endpoint (Root One) + the Users folder.
+      final usersFolder = roots
+          .firstWhere((n) => n['type'] == 'folder' && n['name'] == 'Users');
+      expect(usersFolder['count'], 3); // 2 own + 1 in Admin subfolder
+
+      final usersChildren = (usersFolder['children'] as List).cast<Map>();
+      // Own endpoints come first, then the Admin subfolder.
+      expect(usersChildren.first['type'], 'endpoint');
+      final admin = usersChildren.firstWhere((n) => n['type'] == 'folder');
+      expect(admin['name'], 'Admin');
+      final adminChildren = (admin['children'] as List).cast<Map>();
+      expect(adminChildren.single['name'], 'Ban User');
     });
 
     test('serves the HTML page at /', () async {
@@ -205,9 +212,24 @@ void _isolateGroup() {
 
       final res = await _getJson('$url/api/tree');
       expect(res['sourceName'], 'Iso API');
-      expect((res['endpoints'] as List).length, 1);
+      expect(res['total'], 1);
+      expect(_flattenEndpoints(res['roots'] as List).single['name'], 'Ping');
     });
   });
+}
+
+/// Depth-first flatten of the nested tree's endpoint nodes, in the same order
+/// the server assigns indexes (endpoints before subfolders within a folder).
+List<Map> _flattenEndpoints(List nodes) {
+  final out = <Map>[];
+  for (final n in nodes.cast<Map>()) {
+    if (n['type'] == 'endpoint') {
+      out.add(n);
+    } else {
+      out.addAll(_flattenEndpoints(n['children'] as List));
+    }
+  }
+  return out;
 }
 
 Future<Map<String, dynamic>> _getJson(String url) async {

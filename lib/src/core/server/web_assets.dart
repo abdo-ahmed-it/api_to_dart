@@ -66,25 +66,38 @@ const String indexHtml = r'''<!DOCTYPE html>
   .selall input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
   .link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:2px 4px;font-weight:600}
   .tree{flex:1;overflow:auto;padding:6px 0}
-  .folder-head{display:flex;align-items:center;gap:8px;padding:8px 14px;cursor:pointer;
-    user-select:none;font-weight:600;font-size:12.5px;color:var(--muted)}
-  .folder-head:hover{color:var(--ink)}
-  .folder-head .folder-box{width:14px;height:14px;accent-color:var(--accent);cursor:pointer;flex:0 0 auto}
-  .folder-head .caret{font-size:10px;width:10px;transition:.15s}
+  .folder{margin-bottom:2px}
+  .folder-head{display:flex;align-items:center;gap:9px;padding:11px 14px;cursor:pointer;
+    user-select:none;font-weight:700;font-size:13.5px;color:var(--ink);border-radius:8px;
+    margin:1px 6px;transition:background .12s}
+  .folder-head:hover{background:var(--panel)}
+  .folder-head .folder-box{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;flex:0 0 auto}
+  .folder-head .caret{font-size:11px;width:12px;color:var(--accent);transition:transform .15s;flex:0 0 auto}
   .folder-head.collapsed .caret{transform:rotate(-90deg)}
-  .folder-head .fc{margin-left:auto;font-weight:400;font-size:11px;color:var(--faint)}
-  .ep{display:flex;align-items:center;gap:9px;padding:7px 14px 7px 26px;cursor:pointer;
-    border-left:2px solid transparent}
+  .folder-head .fico{font-size:15px;flex:0 0 auto}
+  .folder-head .fname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .folder-head .fc{margin-left:auto;font-weight:600;font-size:11px;color:var(--faint);
+    background:var(--panel2);border-radius:10px;padding:2px 9px;flex:0 0 auto}
+  /* endpoint rows — indented under the folder with a connecting guide line */
+  .folder-kids{position:relative;margin-left:24px;padding-left:2px;
+    border-left:1.5px solid var(--line)}
+  .ep{display:flex;align-items:center;gap:10px;padding:10px 12px 10px 16px;cursor:pointer;
+    border-left:2px solid transparent;border-radius:0 8px 8px 0;margin-right:6px;
+    position:relative;transition:background .12s}
+  .ep::before{content:"";position:absolute;left:-2px;top:50%;width:11px;height:1.5px;
+    background:var(--line)}
   .ep:hover{background:var(--panel)}
   .ep.active{background:var(--panel2);border-left-color:var(--accent)}
-  .ep input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex:0 0 auto}
-  .method{font-family:monospace;font-size:10px;font-weight:700;padding:2px 6px;border-radius:5px;
-    min-width:48px;text-align:center;flex:0 0 auto}
+  .ep.active::before{background:var(--accent)}
+  .ep input{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;flex:0 0 auto}
+  .method{font-family:monospace;font-size:10.5px;font-weight:700;padding:3px 7px;border-radius:6px;
+    min-width:52px;text-align:center;flex:0 0 auto;letter-spacing:.3px}
   .m-GET{background:#0e2a17;color:#86efac}.m-POST{background:#0c2336;color:#7dd3fc}
   .m-PUT{background:#2a230c;color:#fcd34d}.m-PATCH{background:#2a1c0c;color:#fdba74}
   .m-DELETE{background:#2a1212;color:#fca5a5}
-  .ep .nm{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ep .lock{color:var(--amber);font-size:11px;margin-left:auto;flex:0 0 auto}
+  .ep .nm{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ep.active .nm{color:#fff}
+  .ep .lock{color:var(--amber);font-size:12px;margin-left:auto;flex:0 0 auto}
   .empty{color:var(--faint);text-align:center;padding:30px 16px;font-size:13px}
 
   /* detail */
@@ -262,11 +275,22 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
 async function jget(u){const r=await fetch(u);return r.json();}
 async function jpost(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json();}
 
+// Flat index of all endpoint nodes (by index) — built once from the nested
+// roots, used for search/filter, the request builder, and select-all.
+const EP_BY_INDEX={};
+function indexEndpoints(nodes){
+  for(const n of nodes){
+    if(n.type==='endpoint')EP_BY_INDEX[n.index]=n;
+    else indexEndpoints(n.children);
+  }
+}
+
 async function load(){
   TREE=await jget('/api/tree');
+  indexEndpoints(TREE.roots);
   $('#sourceName').textContent=TREE.sourceName;
   $('#topMeta').innerHTML=
-    `<span class="chip">Endpoints <b>${TREE.endpoints.length}</b></span>`+
+    `<span class="chip">Endpoints <b>${TREE.total}</b></span>`+
     `<span class="chip">Mode <b>${TREE.mode}</b></span>`+
     `<span class="chip">Out <b>${esc(TREE.outputDir)}</b></span>`;
   // method filters
@@ -279,62 +303,91 @@ async function load(){
   renderTree();
 }
 
-function filtered(){
+// An endpoint passes the current search/method filters.
+function epMatches(ep){
   const q=$('#search').value.trim().toLowerCase();
-  return TREE.endpoints.filter(ep=>{
-    if(activeFilters.size && !activeFilters.has(ep.method))return false;
-    if(q && !(`${ep.name} ${ep.path} ${ep.method}`.toLowerCase().includes(q)))return false;
-    return true;
-  });
+  if(activeFilters.size && !activeFilters.has(ep.method))return false;
+  if(q && !(`${ep.name} ${ep.path} ${ep.method}`.toLowerCase().includes(q)))return false;
+  return true;
+}
+// All endpoint indexes currently visible (used by master/select-all).
+function filtered(){return Object.values(EP_BY_INDEX).filter(epMatches);}
+
+// Collects the visible endpoint indexes under a node (folder or endpoint).
+function visibleIdxsOf(node){
+  if(node.type==='endpoint')return epMatches(node)?[node.index]:[];
+  return node.children.flatMap(visibleIdxsOf);
 }
 
 function renderTree(){
-  const eps=filtered();
-  $('#visCount').textContent=`${eps.length} shown`;
-  syncMaster();
-  const groups={};
-  for(const ep of eps){const k=ep.folderPath||'(root)';(groups[k]||=[]).push(ep);}
   const tree=$('#tree');
-  if(!eps.length){tree.innerHTML='<div class="empty">No endpoints match.</div>';return;}
+  const vis=filtered();
+  $('#visCount').textContent=`${vis.length} shown`;
+  syncMaster();
+  if(!vis.length){tree.innerHTML='<div class="empty">No endpoints match.</div>';return;}
   tree.innerHTML='';
-  for(const [folder,list] of Object.entries(groups)){
-    const f=document.createElement('div');
-    const idxs=list.map(ep=>ep.index);
-    f.innerHTML=`<div class="folder-head"><input type="checkbox" class="folder-box" title="Select all in this folder">`+
-      `<span class="caret">▾</span><span>${esc(folder)}</span><span class="fc">${list.length}</span></div>`;
-    const fbox=f.querySelector('.folder-box');
-    // toggling the folder box selects/deselects all rows inside it
-    fbox.onclick=e=>{
-      e.stopPropagation();
-      const on=e.target.checked;
-      idxs.forEach(i=>on?SELECTED.add(i):SELECTED.delete(i));
-      $$('.ep input',f).forEach(b=>b.checked=on);
-      updateSel();
-    };
-    for(const ep of list){
-      const row=document.createElement('div');
-      row.className='ep'+(CUR===ep.index?' active':'');
-      row.dataset.idx=ep.index;
-      row.innerHTML=
-        `<input type="checkbox" data-idx="${ep.index}" ${SELECTED.has(ep.index)?'checked':''}>`+
-        `<span class="method m-${ep.method}">${ep.method}</span>`+
-        `<span class="nm" title="${esc(ep.path)}">${esc(ep.name)}</span>`+
-        (ep.requiresAuth?`<span class="lock">🔒</span>`:``);
-      row.querySelector('input').onclick=e=>{
-        e.stopPropagation();
-        toggleSel(ep.index,e.target.checked);
-        syncFolderBox(fbox,idxs);
-      };
-      row.onclick=()=>openEndpoint(ep.index);
-      f.appendChild(row);
-    }
-    syncFolderBox(fbox,idxs);
-    f.querySelector('.folder-head').onclick=()=>{
-      const head=f.querySelector('.folder-head');head.classList.toggle('collapsed');
-      $$('.ep',f).forEach(e=>e.classList.toggle('hidden'));
-    };
-    tree.appendChild(f);
+  // When searching, auto-expand so matches show; otherwise start collapsed.
+  const expand=$('#search').value.trim().length>0;
+  for(const node of TREE.roots){
+    const el=renderNode(node,0,expand);
+    if(el)tree.appendChild(el);
   }
+}
+
+// Recursively renders a folder or endpoint node, mirroring the terminal
+// selector's nested tree. Returns null when nothing under it is visible.
+function renderNode(node,depth,expand){
+  if(node.type==='endpoint'){
+    return epMatches(node)?renderEndpoint(node):null;
+  }
+  // folder
+  const idxs=visibleIdxsOf(node);
+  if(!idxs.length)return null;  // hide empty/filtered-out folders
+  const f=document.createElement('div');
+  f.className='folder';
+  const head=document.createElement('div');
+  head.className='folder-head'+(expand?'':' collapsed');
+  head.innerHTML=
+    `<input type="checkbox" class="folder-box" title="Select all in this folder">`+
+    `<span class="caret">▾</span><span class="fico">📁</span>`+
+    `<span class="fname">${esc(node.name)}</span><span class="fc">${idxs.length}</span>`;
+  const kids=document.createElement('div');
+  kids.className='folder-kids'+(expand?'':' hidden');
+  for(const child of node.children){
+    const el=renderNode(child,depth+1,expand);
+    if(el)kids.appendChild(el);
+  }
+  const fbox=head.querySelector('.folder-box');
+  // ◉ folder checkbox: selects/deselects every visible endpoint beneath it.
+  fbox.onclick=e=>{
+    e.stopPropagation();
+    const on=e.target.checked;
+    idxs.forEach(i=>on?SELECTED.add(i):SELECTED.delete(i));
+    renderTree();updateSel();
+  };
+  syncFolderBox(fbox,idxs);
+  head.onclick=()=>{head.classList.toggle('collapsed');kids.classList.toggle('hidden');};
+  f.appendChild(head);f.appendChild(kids);
+  return f;
+}
+
+function renderEndpoint(ep){
+  const row=document.createElement('div');
+  row.className='ep'+(CUR===ep.index?' active':'');
+  row.dataset.idx=ep.index;
+  // label mirrors the terminal: METHOD badge + path (name as tooltip)
+  row.innerHTML=
+    `<input type="checkbox" data-idx="${ep.index}" ${SELECTED.has(ep.index)?'checked':''}>`+
+    `<span class="method m-${ep.method}">${ep.method}</span>`+
+    `<span class="nm" title="${esc(ep.name)}">${esc(ep.path)}</span>`+
+    (ep.requiresAuth?`<span class="lock">🔒</span>`:``);
+  row.querySelector('input').onclick=e=>{
+    e.stopPropagation();
+    toggleSel(ep.index,e.target.checked);
+    renderTree();  // refresh ancestor folder checkboxes
+  };
+  row.onclick=()=>openEndpoint(ep.index);
+  return row;
 }
 
 // Reflect a folder's selection state on its header checkbox:
