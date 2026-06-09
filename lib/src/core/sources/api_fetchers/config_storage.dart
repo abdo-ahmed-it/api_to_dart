@@ -5,8 +5,7 @@ import 'package:yaml/yaml.dart';
 
 /// Manages stored API keys and config in .api2dart/config.yaml (project root).
 class ConfigStorage {
-  static final String _configDir =
-      p.join(Directory.current.path, '.api2dart');
+  static final String _configDir = p.join(Directory.current.path, '.api2dart');
   static final String _configPath = p.join(_configDir, 'config.yaml');
 
   /// Gets a stored value by key path (e.g. 'postman.api_key').
@@ -75,13 +74,23 @@ class ConfigStorage {
     final file = File(_configPath);
     if (!file.existsSync()) return {};
 
+    final content = file.readAsStringSync();
     try {
-      final content = file.readAsStringSync();
       final yaml = loadYaml(content);
       if (yaml is YamlMap) {
         return _yamlToMap(yaml);
       }
-    } catch (_) {}
+    } catch (_) {
+      // The file exists but won't parse (e.g. corrupted by an older version).
+      // Don't silently treat it as empty — that would let the next write wipe
+      // real data (tokens, etc). Preserve the bad file as a `.bak` and start
+      // fresh, so the user can recover their values if needed.
+      if (content.trim().isNotEmpty) {
+        try {
+          File('$_configPath.bak').writeAsStringSync(content);
+        } catch (_) {/* best-effort */}
+      }
+    }
     return {};
   }
 
@@ -100,9 +109,22 @@ class ConfigStorage {
         sb.writeln('$prefix$key:');
         _writeYaml(sb, value, indent + 1);
       } else {
-        sb.writeln('$prefix$key: "$value"');
+        sb.writeln('$prefix$key: ${_quote(value.toString())}');
       }
     });
+  }
+
+  /// Emits a YAML double-quoted scalar with proper escaping, so values
+  /// containing quotes/backslashes/newlines (e.g. a JSON blob) round-trip
+  /// safely instead of corrupting the file.
+  static String _quote(String value) {
+    final escaped = value
+        .replaceAll('\\', r'\\')
+        .replaceAll('"', r'\"')
+        .replaceAll('\n', r'\n')
+        .replaceAll('\r', r'\r')
+        .replaceAll('\t', r'\t');
+    return '"$escaped"';
   }
 
   static Map<String, dynamic> _yamlToMap(YamlMap yamlMap) {

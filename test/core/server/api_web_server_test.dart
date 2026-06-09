@@ -203,6 +203,16 @@ void main() {
       expect(res['code'], isNot(contains('ApiRequestAction')));
     });
 
+    test('/api/preview sanitizes a traversal file name to a single segment',
+        () async {
+      final res = await _getJson(
+          '$base/api/preview?index=1&fileName=${Uri.encodeComponent('../../evil')}');
+      // path separators + leading dots stripped → safe single segment
+      expect(res['fileName'], 'evil.dart');
+      expect((res['fileName'] as String).contains('/'), isFalse);
+      expect((res['fileName'] as String).contains('..'), isFalse);
+    });
+
     test('/api/dirs lists subfolders and clamps escapes to root', () async {
       // lib/ exists in the project root the test runs from
       final root = await _getJson('$base/api/dirs?path=');

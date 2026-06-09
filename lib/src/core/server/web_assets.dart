@@ -222,8 +222,10 @@ const String indexHtml = r'''<!DOCTYPE html>
     box-shadow:0 24px 60px rgba(0,0,0,.55);overflow:hidden}
   .pick-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
   .pick-title{font-weight:700;font-size:14px}.pick-head .iconbtn{margin-left:auto}
-  .pick-path{padding:10px 18px;font-family:monospace;font-size:12px;color:var(--accent);
+  .pick-path{padding:10px 18px;font-family:monospace;font-size:12px;color:var(--muted);
     border-bottom:1px solid var(--line);word-break:break-all}
+  .pick-path .crumb{color:var(--accent);cursor:pointer}
+  .pick-path .crumb:hover{text-decoration:underline}
   .pick-list{flex:1;overflow:auto;padding:6px 0;min-height:120px}
   .pick-item{display:flex;align-items:center;gap:10px;padding:9px 18px;cursor:pointer;font-size:13px;user-select:none}
   .pick-item:hover{background:var(--panel2)}
@@ -729,48 +731,81 @@ $('#outApplyDir').onclick=()=>{
 
 // ---- folder picker ----
 let PICK_PATH='';
+let PICK_REQ=0;  // in-flight token: only the latest navigation renders
 async function loadDirs(p){
-  PICK_PATH=p||'';
+  const reqId=++PICK_REQ;
+  const target=p||'';
   let d;
-  try{d=await jget('/api/dirs?path='+encodeURIComponent(PICK_PATH));}
-  catch(e){$('#pickList').innerHTML=`<div class="pick-empty">Failed to read folders</div>`;return;}
-  PICK_PATH=d.path||'';
-  $('#pickPath').textContent='/'+PICK_PATH;
-  $('#pickSel').textContent='Selected: '+(PICK_PATH||'(project root)');
-  const list=$('#pickList');list.innerHTML='';
-  // ".." up a level (not at root)
-  if(d.parent!==null){
-    const up=document.createElement('div');up.className='pick-item up';
-    up.innerHTML=`<span class="ico">↩</span><span>..</span>`;
-    up.onclick=()=>loadDirs(d.parent);
-    list.appendChild(up);
+  try{d=await jget('/api/dirs?path='+encodeURIComponent(target));}
+  catch(e){
+    if(reqId!==PICK_REQ)return;  // superseded
+    $('#pickList').innerHTML=`<div class="pick-empty">Failed to read folders</div>`;
+    return;
   }
-  if(!d.dirs.length && d.parent===null){
-    // root with no visible subdirs is fine; show hint
+  if(reqId!==PICK_REQ)return;  // a newer navigation won — drop this render
+  const here=d.path||'';        // server-normalized current path (LOCAL, stable)
+  PICK_PATH=here;
+  renderBreadcrumb(here);
+  $('#pickSel').textContent='Selected: '+(here||'(project root)');
+  const list=$('#pickList');list.innerHTML='';
+  // ".." up a level — shown whenever we're not at the project root.
+  if(d.parent!==null){
+    const parent=d.parent;  // '' at depth 1 (= root), else the parent path
+    const up=document.createElement('div');up.className='pick-item up';
+    up.innerHTML=`<span class="ico">↩</span><span>.. (up one level)</span>`;
+    up.onclick=()=>loadDirs(parent);
+    list.appendChild(up);
   }
   for(const name of d.dirs){
     const it=document.createElement('div');it.className='pick-item';
     it.innerHTML=`<span class="ico">📁</span><span>${esc(name)}</span>`;
-    it.onclick=()=>loadDirs(PICK_PATH?PICK_PATH+'/'+name:name);
+    // capture the path of THIS listing (here), not the mutable global
+    it.onclick=()=>loadDirs(here?here+'/'+name:name);
     list.appendChild(it);
   }
-  if(!list.children.length){
-    list.innerHTML=`<div class="pick-empty">No subfolders here. Use this folder, or go up.</div>`;
+  if(!d.dirs.length){
+    const hint=document.createElement('div');hint.className='pick-empty';
+    hint.textContent='No subfolders here. Use this folder, or go up.';
+    list.appendChild(hint);
   }
 }
-$('#outBrowse').onclick=()=>{
+// Clickable breadcrumb so the user can jump to any ancestor (incl. root).
+function renderBreadcrumb(path){
+  const bc=$('#pickPath');bc.innerHTML='';
+  const root=document.createElement('span');root.className='crumb';
+  root.textContent='⌂ root';root.onclick=()=>loadDirs('');
+  bc.appendChild(root);
+  let acc='';
+  for(const seg of path.split('/').filter(Boolean)){
+    bc.appendChild(document.createTextNode(' / '));
+    acc=acc?acc+'/'+seg:seg;
+    const cur=acc;
+    const c=document.createElement('span');c.className='crumb';
+    c.textContent=seg;c.onclick=()=>loadDirs(cur);
+    bc.appendChild(c);
+  }
+}
+function openPicker(){
   $('#pickOverlay').classList.remove('hidden');
   // start from the current value if it looks project-relative, else root
   const cur=$('#outDir').value.trim();
   loadDirs(cur && !cur.startsWith('/') ? cur : '');
-};
-$('#pickClose').onclick=()=>$('#pickOverlay').classList.add('hidden');
-$('#pickOverlay').onclick=e=>{if(e.target===$('#pickOverlay'))$('#pickOverlay').classList.add('hidden');};
+}
+function closePicker(){$('#pickOverlay').classList.add('hidden');}
+$('#outBrowse').onclick=openPicker;
+$('#pickClose').onclick=closePicker;
+$('#pickOverlay').onclick=e=>{if(e.target===$('#pickOverlay'))closePicker();};
 $('#pickUse').onclick=()=>{
-  $('#outDir').value=PICK_PATH;
-  $('#pickOverlay').classList.add('hidden');
+  $('#outDir').value=PICK_PATH;  // '' = project root (intentional)
+  closePicker();
   updateOutHint();markDirty();
 };
+// Esc closes the picker (and swallow it so it doesn't hit other handlers).
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape' && !$('#pickOverlay').classList.contains('hidden')){
+    e.preventDefault();e.stopPropagation();closePicker();
+  }
+},true);
 
 // small "edited" indicator next to the endpoint name
 function markDirty(){

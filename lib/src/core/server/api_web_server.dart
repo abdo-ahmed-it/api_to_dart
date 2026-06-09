@@ -93,8 +93,15 @@ class ApiWebServer {
   final Map<String, OutputSettings> _settings = {};
   bool _settingsLoaded = false;
 
-  /// Config key holding the JSON-encoded per-endpoint output overrides.
-  static const String _settingsKey = 'wizard.output_overrides';
+  /// Config key holding the JSON-encoded per-endpoint output overrides,
+  /// namespaced by source so overrides from one API don't bleed into another
+  /// that happens to share a `<METHOD> <path>` key.
+  String get _settingsKey {
+    final src = tree.sourceName
+        .replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    return 'output_overrides.${src.isEmpty ? 'default' : src}';
+  }
 
   ApiWebServer({
     required this.tree,
@@ -195,10 +202,17 @@ class ApiWebServer {
     return head[0].toUpperCase() + head.substring(1);
   }
 
-  /// Ensures a file name ends in `.dart`; returns null when blank.
+  /// Ensures a file name is a single safe segment ending in `.dart`; returns
+  /// null when blank. Path separators and `..` are stripped so a file name can
+  /// never escape the output dir.
   static String? _sanitizeFile(String? v) {
     if (v == null) return null;
-    var name = v.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_./-]'), '_');
+    // take only the last path segment, then allow a conservative char set
+    var name = v.trim().replaceAll('\\', '/');
+    name = name.contains('/') ? name.split('/').last : name;
+    name = name.replaceAll(RegExp(r'[^a-zA-Z0-9_.-]'), '_');
+    // collapse any leading dots (defeats "..", hidden files)
+    name = name.replaceAll(RegExp(r'^\.+'), '');
     if (name.isEmpty) return null;
     if (!name.endsWith('.dart')) name = '$name.dart';
     return name;
