@@ -1,3 +1,14 @@
+## 0.5.0
+
+### Added
+- New `api2dart serve` command — launches a local web UI to select endpoints
+  and generate code from the browser. Parses the source (same flags as
+  `generate`), prints a `localhost` link, and serves a single-page UI that
+  lists the endpoint tree with checkboxes. Selecting endpoints and clicking
+  **Generate** writes the exact same `*_action.dart` / `*_response.dart` files
+  and Markdown logs as `generate` (it reuses the same core pipeline). Works in
+  non-TTY environments (no raw stdin). Binds to loopback only.
+
 ## 0.4.0
 
 ### Added

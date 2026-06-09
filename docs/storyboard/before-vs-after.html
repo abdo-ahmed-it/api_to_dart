@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>api2dart — قبل وبعد</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --ink:#e2e8f0; --muted:#94a3b8;
+    --line:#334155; --pain:#ef4444; --pain-soft:#7f1d1d; --pain-bg:#2a1414;
+    --win:#22c55e; --win-soft:#14532d; --win-bg:#0e2417;
+    --accent:#38bdf8; --amber:#f59e0b; --purple:#a78bfa;
+    --code:#0b1220;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:#020617; color:var(--ink);
+    font-family:"Segoe UI",Tahoma,system-ui,sans-serif;
+    padding:32px; display:flex; flex-direction:column; align-items:center; gap:28px;
+  }
+  .hint{color:var(--muted);font-size:13px;text-align:center;max-width:1000px;line-height:1.7}
+  .hint code{background:#1e293b;padding:2px 7px;border-radius:5px;color:var(--accent)}
+
+  /* 16:9 frame */
+  .frame{
+    width:1280px; height:720px; background:var(--bg);
+    border:1px solid var(--line); border-radius:20px; overflow:hidden;
+    position:relative; box-shadow:0 24px 60px rgba(0,0,0,.55);
+    display:flex; flex-direction:column;
+  }
+  .frame-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:22px 36px; border-bottom:1px solid var(--line);
+  }
+  .badge{
+    display:inline-flex; align-items:center; gap:10px;
+    font-size:15px; font-weight:700; letter-spacing:.3px;
+    padding:8px 16px; border-radius:999px;
+  }
+  .badge.pain{background:var(--pain-bg); color:#fca5a5; border:1px solid var(--pain-soft)}
+  .badge.win{background:var(--win-bg); color:#86efac; border:1px solid var(--win-soft)}
+  .frame-num{color:var(--muted); font-size:14px; font-weight:600}
+  .frame-title{font-size:30px; font-weight:800; padding:26px 36px 6px}
+  .frame-sub{color:var(--muted); font-size:17px; padding:0 36px 18px; line-height:1.6}
+  .frame-body{flex:1; padding:8px 36px 32px; display:flex; align-items:center}
+
+  /* generic step row */
+  .steps{display:flex; align-items:stretch; gap:18px; width:100%}
+  .step{
+    flex:1; background:var(--panel); border:1px solid var(--line);
+    border-radius:16px; padding:22px; display:flex; flex-direction:column; gap:12px;
+    position:relative;
+  }
+  .step .icon{font-size:34px}
+  .step h3{font-size:19px; font-weight:700}
+  .step p{color:var(--muted); font-size:14px; line-height:1.6}
+  .step .tag{
+    margin-top:auto; align-self:flex-start; font-size:12px; font-weight:700;
+    padding:5px 11px; border-radius:8px;
+  }
+  .tag.bad{background:var(--pain-bg); color:#fca5a5}
+  .tag.warn{background:#3b2f12; color:#fcd34d}
+  .arrow{display:flex; align-items:center; color:var(--line); font-size:30px}
+  .num-chip{
+    position:absolute; top:-12px; inset-inline-start:18px;
+    width:30px; height:30px; border-radius:50%; background:var(--pain);
+    color:#fff; font-weight:800; font-size:15px;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 4px 12px rgba(239,68,68,.4);
+  }
+  .num-chip.win{background:var(--win); box-shadow:0 4px 12px rgba(34,197,94,.4)}
+
+  /* code block */
+  .code{
+    background:var(--code); border:1px solid var(--line); border-radius:14px;
+    padding:22px 26px; font-family:"SF Mono",Menlo,Consolas,monospace;
+    font-size:16px; line-height:1.9; direction:ltr; text-align:left; width:100%;
+  }
+  .code .c-comment{color:#64748b}
+  .code .c-cmd{color:#86efac}
+  .code .c-flag{color:var(--accent)}
+  .code .c-str{color:#fcd34d}
+  .code .c-key{color:var(--purple)}
+
+  /* hero numbers */
+  .metrics{display:flex; gap:20px; width:100%}
+  .metric{
+    flex:1; text-align:center; background:var(--panel);
+    border:1px solid var(--line); border-radius:16px; padding:26px 16px;
+  }
+  .metric .big{font-size:46px; font-weight:900; line-height:1}
+  .metric .lbl{color:var(--muted); font-size:14px; margin-top:10px}
+  .big.pain{color:var(--pain)} .big.win{color:var(--win)}
+
+  .pipe{
+    display:flex; align-items:center; gap:14px; width:100%; justify-content:center;
+    flex-wrap:wrap;
+  }
+  .pill{
+    background:var(--panel); border:1px solid var(--line); border-radius:999px;
+    padding:14px 22px; font-size:16px; font-weight:600; display:flex; gap:10px; align-items:center;
+  }
+  .pill .em{font-size:22px}
+  .pipe .arrow{font-size:26px}
+  .foot{
+    position:absolute; bottom:0; inset-inline-start:0; right:0;
+    height:6px; width:100%;
+  }
+  .foot.pain{background:linear-gradient(90deg,var(--pain),var(--amber))}
+  .foot.win{background:linear-gradient(90deg,var(--accent),var(--win))}
+  .logo{font-weight:800; color:var(--accent); font-size:15px}
+</style>
+</head>
+<body>
+
+  <div class="hint">
+    🎬 <b>Storyboard — المعاناة قبل <code>api2dart</code></b> · 5 لوحات بصيغة 16:9.
+    لتصديرها كصور: افتح الملف في المتصفح ثم خذ screenshot لكل لوحة، أو اطبع الصفحة PDF
+    (<code>Cmd/Ctrl + P</code>) وكل لوحة على صفحة.
+  </div>
+
+  <!-- FRAME 1 -->
+  <section class="frame">
+    <div class="frame-head">
+      <span class="badge pain">😣 BEFORE · الطريقة اليدوية</span>
+      <span class="frame-num">المشهد 1 / 5</span>
+    </div>
+    <div class="frame-title">يبدأ في Apidog يدوّر على الـ request</div>
+    <div class="frame-sub">قبل أي سطر كود، المطوّر يفتح Apidog ويبحث وسط عشرات الـ endpoints عن اللي محتاجه.</div>
+    <div class="frame-body">
+      <div class="steps">
+        <div class="step">
+          <span class="num-chip">1</span>
+          <div class="icon">🗂️</div>
+          <h3>يفتح Apidog</h3>
+          <p>يتنقّل بين المجلدات والـ collections بحثًا عن الـ endpoint الصحيح.</p>
+          <span class="tag bad">تنقّل يدوي</span>
+        </div>
+        <div class="arrow">‹</div>
+        <div class="step">
+          <span class="num-chip">2</span>
+          <div class="icon">🔎</div>
+          <h3>يحدّد الـ request</h3>
+          <p>المسار، الـ method، الـ headers، الـ body، الـ query — يقرأها واحدة واحدة.</p>
+          <span class="tag bad">قراءة يدوية</span>
+        </div>
+        <div class="arrow">‹</div>
+        <div class="step">
+          <span class="num-chip">3</span>
+          <div class="icon">⏳</div>
+          <h3>يجهّز البيانات</h3>
+          <p>توكن، باراميترز، نموذج body صحيح قبل ما يقدر يبعت أصلًا.</p>
+          <span class="tag warn">وقت ضائع</span>
+        </div>
+      </div>
+    </div>
+    <div class="foot pain"></div>
+  </section>
+
+  <!-- FRAME 2 -->
+  <section class="frame">
+    <div class="frame-head">
+      <span class="badge pain">😣 BEFORE · الطريقة اليدوية</span>
+      <span class="frame-num">المشهد 2 / 5</span>
+    </div>
+    <div class="frame-title">يبعت الـ request ويستنى الـ response</div>
+    <div class="frame-sub">ينفّذ الطلب داخل Apidog، يستلم الـ JSON، ويبدأ يحلّله بعينه ليفهم كل حقل ونوعه.</div>
+    <div class="frame-body" style="flex-direction:column; gap:20px; align-items:stretch">
+      <div class="pipe">
+        <span class="pill"><span class="em">📤</span> يبعت الطلب</span>
+        <span class="arrow">‹</span>
+        <span class="pill"><span class="em">🌐</span> السيرفر يردّ</span>
+        <span class="arrow">‹</span>
+        <span class="pill"><span class="em">📥</span> JSON خام</span>
+        <span class="arrow">‹</span>
+        <span class="pill"><span class="em">🧐</span> يحلّله بنفسه</span>
+      </div>
+      <div class="code">
+<span class="c-comment">// response خام لازم يحوّله لموديل Dart بإيده…</span><br>
+{ <span class="c-key">"id"</span>: <span class="c-str">1</span>, <span class="c-key">"name"</span>: <span class="c-str">"Sara"</span>, <span class="c-key">"roles"</span>: [ <span class="c-str">"admin"</span> ],<br>
+&nbsp;&nbsp;<span class="c-key">"profile"</span>: { <span class="c-key">"phone"</span>: <span class="c-str">"5xxxxx"</span>, <span class="c-key">"verified"</span>: <span class="c-str">true</span> } }
+      </div>
+    </div>
+    <div class="foot pain"></div>
+  </section>
+
+  <!-- FRAME 3 -->
+  <section class="frame">
+    <div class="frame-head">
+      <span class="badge pain">😣 BEFORE · الطريقة اليدوية</span>
+      <span class="frame-num">المشهد 3 / 5</span>
+    </div>
+    <div class="frame-title">يكتب كل الـ models بإيده… أو بأداة خارجية</div>
+    <div class="frame-sub">لكل response يقعد يكتب class بـ <code style="color:var(--accent)">fromJson</code> / <code style="color:var(--accent)">toJson</code> يدويًا — أو يلجأ لموقع خارجي يولّدها.</div>
+    <div class="frame-body">
+      <div class="steps">
+        <div class="step">
+          <span class="num-chip">A</span>
+          <div class="icon">⌨️</div>
+          <h3>كتابة يدوية</h3>
+          <p>كل حقل، كل نوع، كل nested object — معرّض للأخطاء ومضيعة للوقت.</p>
+          <span class="tag bad">بطيء + أخطاء</span>
+        </div>
+        <div class="arrow">‹</div>
+        <div class="step">
+          <span class="num-chip">B</span>
+          <div class="icon">🌍</div>
+          <h3>أداة خارجية</h3>
+          <p>يفتح موقع تحويل JSON→Dart، يلصق الـ response، ينتظر النتيجة.</p>
+          <span class="tag warn">خروج عن المشروع</span>
+        </div>
+        <div class="arrow">‹</div>
+        <div class="step">
+          <span class="num-chip">C</span>
+          <div class="icon">🧩</div>
+          <h3>نتيجة غير متّسقة</h3>
+          <p>تسمية مختلفة، أنواع تقديرية، بلا ApiRequestAction جاهز.</p>
+          <span class="tag bad">تنظيف إضافي</span>
+        </div>
+      </div>
+    </div>
+    <div class="foot pain"></div>
+  </section>
+
+  <!-- FRAME 4 -->
+  <section class="frame">
+    <div class="frame-head">
+      <span class="badge pain">😣 BEFORE · الطريقة اليدوية</span>
+      <span class="frame-num">المشهد 4 / 5</span>
+    </div>
+    <div class="frame-title">Copy / Paste للكود في المشروع</div>
+    <div class="frame-sub">ينسخ النتيجة، يلصقها في الملفات الصح، يعدّل الـ imports والأسماء — ويكرّر كل ده مع <b>كل endpoint</b>.</div>
+    <div class="frame-body" style="flex-direction:column; gap:22px; align-items:stretch">
+      <div class="metrics">
+        <div class="metric"><div class="big pain">↻ ×N</div><div class="lbl">يتكرّر لكل endpoint</div></div>
+        <div class="metric"><div class="big pain">📋</div><div class="lbl">نسخ ولصق يدوي</div></div>
+        <div class="metric"><div class="big pain">🐞</div><div class="lbl">أخطاء بشرية محتملة</div></div>
+        <div class="metric"><div class="big pain">🕒</div><div class="lbl">دقائق ضائعة × كثير</div></div>
+      </div>
+      <div class="code">
+<span class="c-comment">// 4 خطوات يدوية × كل endpoint في المشروع =</span><br>
+<span class="c-comment">// مجهود متكرّر، ممل، وعرضة للخطأ 😮‍💨</span>
+      </div>
+    </div>
+    <div class="foot pain"></div>
+  </section>
+
+  <!-- FRAME 5 -->
+  <section class="frame">
+    <div class="frame-head">
+      <span class="badge win">✅ AFTER · مع api2dart</span>
+      <span class="frame-num">المشهد 5 / 5</span>
+    </div>
+    <div class="frame-title">أمر واحد… يعمل كل ده تلقائيًا</div>
+    <div class="frame-sub">يقرأ المصدر (Postman / OpenAPI / Apidog / YAML)، يجيب الـ response، ويولّد الـ action + الموديلز جاهزة في مشروعك.</div>
+    <div class="frame-body" style="flex-direction:column; gap:22px; align-items:stretch">
+      <div class="code">
+<span class="c-cmd">api2dart</span> <span class="c-cmd">generate</span> <span class="c-flag">-s</span> apidog <span class="c-flag">-o</span> lib/actions<br>
+<span class="c-comment">// ↳ يولّد ApiRequestAction + Response model بـ fromJson/toJson</span><br>
+<span class="c-comment">// ↳ ويسجّل log قابل لإعادة الإرسال:</span> <span class="c-cmd">api2dart</span> <span class="c-cmd">resend</span> <span class="c-str">'log.md'</span>
+      </div>
+      <div class="metrics">
+        <div class="metric"><div class="big win">1</div><div class="lbl">أمر بدل 4 خطوات</div></div>
+        <div class="metric"><div class="big win">0</div><div class="lbl">copy / paste</div></div>
+        <div class="metric"><div class="big win">✓</div><div class="lbl">تسمية وأنواع متّسقة</div></div>
+        <div class="metric"><div class="big win">↺</div><div class="lbl">resend بأمر واحد</div></div>
+      </div>
+      <div style="text-align:center" class="logo">api2dart · من API إلى Dart في خطوة واحدة</div>
+    </div>
+    <div class="foot win"></div>
+  </section>
+
+</body>
+</html>
