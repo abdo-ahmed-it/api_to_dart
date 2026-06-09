@@ -152,23 +152,39 @@ const String indexHtml = r'''<!DOCTYPE html>
   .codehead .fn{font-family:monospace;font-size:12.5px;color:var(--accent)}
 
   /* response */
-  .resp{flex:0 0 auto;max-height:42%;display:flex;flex-direction:column;border-top:1px solid var(--line);background:var(--bg2)}
-  .resp-head{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--line)}
+  .resp{flex:0 0 auto;height:42%;min-height:160px;display:flex;flex-direction:column;
+    border-top:1px solid var(--line);background:var(--bg2);transition:height .18s ease}
+  .resp.expanded{height:78%}
+  .resp-head{display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid var(--line);flex:0 0 auto}
   .resp-head .ttl{font-weight:700;font-size:13px}
   .status{font-family:monospace;font-weight:700;font-size:12px;padding:3px 9px;border-radius:6px}
   .status.ok{background:#0e2a17;color:#86efac}.status.bad{background:#2a1212;color:#fca5a5}
   .status.warn{background:#2a230c;color:#fcd34d}
-  .resp-meta{color:var(--muted);font-size:12px}
-  .resp-body{flex:1;overflow:auto;padding:0}
+  .resp-meta{color:var(--muted);font-size:12px;font-family:monospace}
+  /* Body/Headers tabs in the response header */
+  .resp-tabs{display:flex;gap:2px}
+  .rtab{font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;padding:5px 11px;
+    border-radius:7px;user-select:none}
+  .rtab:hover{color:var(--ink)}
+  .rtab.on{color:var(--accent);background:var(--panel)}
+  .rtab .badge{background:var(--panel2);color:var(--muted);font-size:10px;padding:1px 6px;border-radius:8px;margin-left:4px}
+  .iconbtn{background:none;border:1px solid var(--line);color:var(--muted);cursor:pointer;
+    font-size:13px;border-radius:7px;padding:4px 9px;line-height:1}
+  .iconbtn:hover{color:var(--ink);border-color:var(--accent)}
+  .resp-body{flex:1;overflow:auto;padding:0;min-height:0}
   .resp-body pre{padding:14px 18px;font-family:"SF Mono",Menlo,monospace;font-size:12.5px;
-    line-height:1.6;color:#cbd5e1;white-space:pre-wrap;word-break:break-word}
+    line-height:1.65;white-space:pre-wrap;word-break:break-word;color:#cbd5e1}
   .resp-empty{color:var(--faint);padding:20px 18px;font-size:13px}
-  .resp-info{padding:10px 18px;border-bottom:1px solid var(--line);font-size:12px}
-  .resp-line{display:flex;gap:10px;padding:2px 0;font-family:monospace;word-break:break-all}
-  .resp-line b{color:var(--accent);font-weight:600;min-width:120px;flex:0 0 auto}
-  .resp-line span{color:var(--muted)}
-  .resp-headers summary{cursor:pointer;color:var(--muted);font-size:12px;padding:4px 0;user-select:none}
-  .resp-headers summary:hover{color:var(--ink)}
+  /* response headers pane (table) */
+  .rh-table{width:100%;border-collapse:collapse;font-family:monospace;font-size:12px}
+  .rh-table td{padding:7px 18px;border-bottom:1px solid var(--line);vertical-align:top;word-break:break-all}
+  .rh-table td.k{color:var(--accent);width:34%;font-weight:600}
+  .rh-table td.v{color:var(--muted)}
+  .rh-url{padding:10px 18px;border-bottom:1px solid var(--line);font-family:monospace;font-size:11.5px;
+    color:var(--faint);word-break:break-all}.rh-url b{color:var(--accent)}
+  /* JSON syntax highlighting */
+  .j-key{color:#7dd3fc}.j-str{color:#86efac}.j-num{color:#fcd34d}
+  .j-bool{color:#c084fc}.j-null{color:#f87171}.j-punc{color:#64748b}
   .spinner{display:inline-block;width:13px;height:13px;border:2px solid var(--line);
     border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -317,9 +333,15 @@ const String indexHtml = r'''<!DOCTYPE html>
         <span id="respStatus"></span>
         <span class="resp-meta" id="respMeta"></span>
         <span class="spacer" style="margin-left:auto"></span>
-        <button class="link" id="respClose">hide</button>
+        <div class="resp-tabs" id="respTabs">
+          <span class="rtab on" data-rt="body">Body</span>
+          <span class="rtab" data-rt="headers">Headers <span class="badge" id="rhCount">0</span></span>
+        </div>
+        <button class="iconbtn" id="respExpand" title="Expand / collapse">⤢</button>
+        <button class="iconbtn" id="respClose" title="Hide">✕</button>
       </div>
       <div class="resp-body" id="respBody"></div>
+      <div class="resp-body hidden" id="respHeadersPane"></div>
     </div>
   </section>
 </div>
@@ -684,29 +706,63 @@ $('#send').onclick=async()=>{
   }catch(e){renderResponse({ok:false,error:String(e)});}
   finally{btn.disabled=false;btn.textContent='Send';}
 };
+// Pretty-prints + syntax-highlights a JSON string. Falls back to escaped plain
+// text when the body isn't valid JSON.
+function highlightJson(raw){
+  let obj;
+  try{obj=JSON.parse(raw);}catch(_){return esc(raw);}
+  const json=JSON.stringify(obj,null,2);
+  return esc(json).replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)/g,
+    m=>{
+      let cls='j-num';
+      if(/^"/.test(m))cls=/:$/.test(m)?'j-key':'j-str';
+      else if(/true|false/.test(m))cls='j-bool';
+      else if(/null/.test(m))cls='j-null';
+      return `<span class="${cls}">${m}</span>`;
+    });
+}
+
 function renderResponse(res){
+  $('#resp').classList.remove('hidden');
   if(!res.ok){
     $('#respStatus').innerHTML=`<span class="status bad">failed</span>`;
     $('#respMeta').textContent='';
+    $('#rhCount').textContent='0';
     $('#respBody').innerHTML=`<div class="resp-empty">${esc(res.error||'Request failed')}</div>`;
+    $('#respHeadersPane').innerHTML='';
+    switchRespTab('body');
     return;
   }
   const cls=res.status>=200&&res.status<300?'ok':(res.status>=400?'bad':'warn');
   $('#respStatus').innerHTML=`<span class="status ${cls}">${res.status}</span>`;
-  $('#respMeta').textContent=`${res.timeMs} ms`;
-  let body=res.body;
-  try{body=JSON.stringify(JSON.parse(res.body),null,2);}catch(_){}
-  // show the actual URL hit + response headers (collapsible) above the body
-  let head='';
-  if(res.requestUrl)head+=`<div class="resp-line"><b>URL</b> <span>${esc(res.requestUrl)}</span></div>`;
+  const size=res.body?`${(new Blob([res.body]).size/1024).toFixed(1)} KB`:'0 KB';
+  $('#respMeta').textContent=`${res.timeMs} ms · ${size}`;
+
+  // Body pane — highlighted JSON (or raw text)
+  $('#respBody').innerHTML=`<pre>${highlightJson(res.body||'')}</pre>`;
+
+  // Headers pane — request URL + a clean table of response headers
   const rh=res.responseHeaders||{};
   const hk=Object.keys(rh);
-  if(hk.length){
-    head+=`<details class="resp-headers"><summary>${hk.length} response headers</summary>`+
-      hk.map(k=>`<div class="resp-line"><b>${esc(k)}</b> <span>${esc(rh[k])}</span></div>`).join('')+`</details>`;
-  }
-  $('#respBody').innerHTML=(head?`<div class="resp-info">${head}</div>`:'')+`<pre>${esc(body)}</pre>`;
+  $('#rhCount').textContent=hk.length;
+  let hh=res.requestUrl?`<div class="rh-url"><b>Request URL</b> &nbsp;${esc(res.requestUrl)}</div>`:'';
+  hh+=`<table class="rh-table"><tbody>`+
+    (hk.length?hk.map(k=>`<tr><td class="k">${esc(k)}</td><td class="v">${esc(rh[k])}</td></tr>`).join('')
+      :`<tr><td class="v" colspan="2">No response headers</td></tr>`)+
+    `</tbody></table>`;
+  $('#respHeadersPane').innerHTML=hh;
+  switchRespTab('body');
 }
+
+// response sub-tabs (Body / Headers)
+function switchRespTab(name){
+  $$('.rtab').forEach(t=>t.classList.toggle('on',t.dataset.rt===name));
+  $('#respBody').classList.toggle('hidden',name!=='body');
+  $('#respHeadersPane').classList.toggle('hidden',name!=='headers');
+}
+$$('.rtab').forEach(t=>t.onclick=()=>switchRespTab(t.dataset.rt));
+$('#respExpand').onclick=()=>$('#resp').classList.toggle('expanded');
 $('#respClose').onclick=()=>$('#resp').classList.add('hidden');
 
 // ---- generate selected ----
