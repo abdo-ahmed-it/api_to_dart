@@ -84,10 +84,13 @@ void main() {
         },
       );
 
+      // Generous timeout so a slow POST under parallel test load still lands
+      // as an empty submission (the result is null either way, but this keeps
+      // the test deterministic).
       final token = await capture.captureToken(
         providerName: 'TestProvider',
         tokenPageUrl: 'https://example.com/token',
-        timeout: const Duration(milliseconds: 800),
+        timeout: const Duration(seconds: 5),
       );
 
       expect(token, isNull);

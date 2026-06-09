@@ -33,6 +33,8 @@ build/
 # API to Dart config (contains API keys)
 .api2dart/
 .api2dart_temp_*
+# Generated output (dated actions/ + logs/ folders)
+api2dart/
 # Legacy paths (pre-rename) — keep ignored
 .apigen/
 .apigen_debug_export.json

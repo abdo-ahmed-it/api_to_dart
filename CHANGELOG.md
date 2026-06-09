@@ -1,4 +1,4 @@
-## 0.5.0
+## 0.6.0
 
 ### Added
 - **Local web UI** — a browser-based, Apidog-like workspace to browse, try, and
@@ -6,33 +6,50 @@
   - The interactive wizard (`api2dart` with no args) prints an **optional web
     link** after loading endpoints — for any source (Postman/Apidog/file). The
     terminal selector still works exactly as before; the link is an extra way
-    to work in the browser. The server runs until `Ctrl+C`.
+    to work in the browser. The server runs in its own isolate (so it stays
+    responsive while the terminal selector is active) until `Ctrl+C`, and falls
+    back to a free port if the default is busy.
   - `api2dart serve -s <source> -c <file>` opens the web UI directly for a
     **local file** (and auto-opens the browser; `--no-open` to skip,
     `-p/--port` to choose a port). For live Apidog/Postman fetch, use the
     wizard.
-  - The UI mirrors the terminal selector's nested folder tree (collapsed by
-    default), with live search, per-method filters, and folder/master
+  - **Sidebar** mirrors the terminal selector's nested folder tree (collapsed
+    by default), with live search, per-method filters, and folder/master
     checkboxes — selection state and scroll are preserved while you pick.
   - **Request builder** — editable method/URL + Params/Headers/Body/Auth tabs
     and a **Send** button that fires the real request and shows status, time,
-    response headers, and formatted JSON. The session token is applied
-    automatically (Bearer) for authenticated endpoints.
-  - **Code preview** of the generated Dart per endpoint.
+    response headers, and syntax-highlighted JSON (Body/Headers tabs, expandable
+    panel). The session token is applied automatically (Bearer) for
+    authenticated endpoints; per-endpoint edits are preserved when switching.
+  - **Code preview** of the generated Dart per endpoint, updated live as you
+    edit output settings.
+  - **Output tab** — control, per endpoint, the output directory (with a 📁
+    folder picker that browses your project, plus "apply to all"), file name,
+    Action/Response class names, and mode. Settings persist to
+    `.api2dart/config.yaml` and prefill on the next run.
   - **Generate selected** writes the exact same `*_action.dart` /
-    `*_response.dart` files and Markdown logs as the terminal `generate`,
-    including correct Apidog URL-variable path/base-URL resolution (see Fixed).
-  - Keyboard: `/` focuses search, `Ctrl/Cmd+Enter` sends. Loopback-only; works
-    in non-TTY environments.
+    `*_response.dart` files and Markdown logs as the terminal `generate`.
+  - Responsive layout (mobile drawer), keyboard shortcuts (`/` focuses search,
+    `Ctrl/Cmd+Enter` sends), and an "already generated" marker. Loopback-only;
+    works in non-TTY environments.
+- **Guided browser token capture** — when no saved token exists, the
+  Postman/Apidog sign-in opens a small local page that links to the provider's
+  token page; paste the token there and it returns straight to the CLI (no
+  terminal paste). Falls back to a terminal prompt when headless or unavailable.
 
 ### Fixed
 - Apidog endpoints whose paths use a URL-variable prefix (e.g.
   `/system_user_url/login`) are now resolved consistently across the terminal
   and web flows: the prefix is stripped, the correct per-endpoint base URL is
-  applied, and the name is rebuilt from the clean path. Previously this
-  resolution happened only in the terminal generate path, so the web UI showed
-  and generated wrong URLs/paths for such Apidog projects. The logic now lives
-  in a shared `UrlVariableResolver` used by both.
+  applied, and the name is rebuilt from the clean path. The logic lives in a
+  shared `UrlVariableResolver` used by both.
+- Saved settings no longer corrupt `.api2dart/config.yaml`. Stored values are
+  now properly YAML-escaped, so values containing quotes round-trip safely
+  instead of breaking the file (which previously wiped saved tokens on the next
+  read). A config that fails to parse is preserved as a `.bak` rather than
+  silently overwritten.
+- A custom output file name can no longer escape the chosen output directory
+  (path separators and `..` are stripped to a single safe segment).
 
 ## 0.4.0
 
