@@ -1,3 +1,23 @@
+## 0.5.0
+
+### Added
+- New `api2dart serve` command — launches a local, Apidog-like web UI to
+  browse, try, and generate from your API source in the browser. Parses the
+  source (same flags as `generate`), prints a `localhost` link, and (by
+  default) opens it automatically. The UI provides:
+  - **Sidebar** — endpoint tree grouped by folder, with live search, per-method
+    filters, and checkboxes for batch selection.
+  - **Request builder** — editable method/URL plus Params / Headers / Body /
+    Auth tabs, and a **Send** button that fires the real request and shows the
+    live response (status, time, formatted JSON). No files written.
+  - **Code preview** — the generated Dart for the selected endpoint, on demand.
+  - **Generate selected** — writes the exact same `*_action.dart` /
+    `*_response.dart` files and Markdown logs as `generate` (same core
+    pipeline).
+  - Keyboard: `/` focuses search, `Ctrl/Cmd+Enter` sends the request.
+  - `--no-open` to skip auto-launching the browser; `-p/--port` to pick a port.
+  - Binds to loopback only; works in non-TTY environments (no raw stdin).
+
 ## 0.4.0
 
 ### Added

@@ -8,6 +8,7 @@ import '../core/version.dart';
 import 'commands/generate_command.dart';
 import 'commands/resend_command.dart';
 import 'commands/reset_command.dart';
+import 'commands/serve_command.dart';
 import 'commands/upgrade_command.dart';
 import 'commands/version_command.dart';
 import 'ui/terminal_utils.dart';
@@ -25,6 +26,7 @@ class CliApp {
         ) {
     _runner.addCommand(GenerateCommand());
     _runner.addCommand(ResendCommand());
+    _runner.addCommand(ServeCommand());
     _runner.addCommand(ResetCommand());
     _runner.addCommand(VersionCommand());
     _runner.addCommand(UpgradeCommand());

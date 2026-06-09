@@ -31,6 +31,9 @@ export 'src/core/generation/response_generator.dart';
 export 'src/core/resolution/http_client.dart';
 export 'src/core/resolution/response_resolver.dart';
 
+// Server (local web UI)
+export 'src/core/server/api_web_server.dart';
+
 // JSON to Dart
 export 'src/core/json_to_dart/model_generator.dart';
 
