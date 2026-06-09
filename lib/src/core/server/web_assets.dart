@@ -97,7 +97,10 @@ const String indexHtml = r'''<!DOCTYPE html>
   .m-DELETE{background:#2a1212;color:#fca5a5}
   .ep .nm{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ep.active .nm{color:#fff}
-  .ep .lock{color:var(--amber);font-size:12px;margin-left:auto;flex:0 0 auto}
+  .ep .lock{color:var(--amber);font-size:12px;flex:0 0 auto}
+  .ep .gen-tag{margin-left:auto;color:var(--green);font-size:11px;font-weight:700;flex:0 0 auto}
+  .ep .gen-tag+.lock{margin-left:6px}
+  .ep .lock:only-of-type{margin-left:auto}
   .empty{color:var(--faint);text-align:center;padding:30px 16px;font-size:13px}
 
   /* detail */
@@ -110,6 +113,8 @@ const String indexHtml = r'''<!DOCTYPE html>
     border-radius:8px;padding:8px 12px;font-family:monospace;font-size:12.5px;outline:none}
   .reqline .url:focus{border-color:var(--accent)}
   .epname{padding:10px 18px 0;font-weight:700;font-size:15px}
+  .dirty-tag{margin-left:9px;font-size:10px;font-weight:600;color:var(--amber);
+    background:#3b2f12;padding:2px 8px;border-radius:8px;vertical-align:middle}
   .epdesc{padding:2px 18px 0;color:var(--muted);font-size:12.5px}
   .tabs{display:flex;gap:2px;padding:10px 18px 0;border-bottom:1px solid var(--line)}
   .tab{padding:8px 14px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;
@@ -176,11 +181,61 @@ const String indexHtml = r'''<!DOCTYPE html>
   .gr-row{display:flex;gap:8px;padding:4px 0;font-size:12px;font-family:monospace}
   .gr-row .ok{color:var(--green)}.gr-row .bad{color:var(--red)}.gr-row .warn{color:var(--amber)}
   .gr-sub{color:var(--muted)}
+  .gr-logs{margin-top:10px}
+  .gr-logs summary{cursor:pointer;color:var(--muted);font-size:12px;user-select:none}
+  .gr-logs summary:hover{color:var(--ink)}
+  .gr-logs pre{margin-top:8px;background:#060b16;border:1px solid var(--line);border-radius:8px;
+    padding:10px;font-size:11px;color:var(--muted);max-height:160px;overflow:auto;white-space:pre-wrap}
   .hidden{display:none!important}
+
+  /* hamburger + overlay (hidden on desktop) */
+  .hamburger{display:none;background:var(--panel);border:1px solid var(--line);
+    color:var(--ink);font-size:16px;border-radius:8px;padding:6px 11px;cursor:pointer;flex:0 0 auto}
+  .hamburger:hover{border-color:var(--accent)}
+  .side-overlay{display:none}
+
+  /* Tablet / small laptop: narrower sidebar, wrap top meta */
+  @media (max-width:1024px){
+    .side{width:280px}
+    .top-meta{display:none}
+  }
+
+  /* Mobile: sidebar becomes a slide-in drawer; builder + response stack */
+  @media (max-width:760px){
+    .hamburger{display:inline-flex;align-items:center}
+    .topbar{flex-wrap:wrap;gap:10px;padding:10px 12px}
+    .logo{font-size:16px}
+    .src{display:none}
+    #generate{font-size:12px;padding:7px 11px}
+    .selinfo{font-size:12px}
+
+    .main{position:relative}
+    .side{position:absolute;z-index:40;top:0;bottom:0;left:0;width:86%;max-width:340px;
+      transform:translateX(-100%);transition:transform .22s ease;
+      box-shadow:6px 0 24px rgba(0,0,0,.5)}
+    .side.open{transform:translateX(0)}
+    .side-overlay{position:absolute;inset:0;z-index:30;background:rgba(0,0,0,.5);
+      opacity:0;pointer-events:none;transition:opacity .22s}
+    .side-overlay.open{display:block;opacity:1;pointer-events:auto}
+
+    /* request line + tabs scroll horizontally instead of squashing */
+    .reqline{flex-wrap:wrap}
+    .reqline .url{min-width:0;flex:1 1 100%;order:3}
+    .tabs{overflow-x:auto;white-space:nowrap}
+    .tabwrap{padding:12px}
+    .epname{padding:10px 12px 0}.epdesc{padding:2px 12px 0}
+
+    /* response panel taller on mobile (no side-by-side detail) */
+    .resp{max-height:55%}
+    .resp-head{padding:9px 12px}.resp-body pre{padding:12px}
+
+    .genres{right:8px;left:8px;bottom:8px;width:auto;max-height:55vh}
+  }
 </style>
 </head>
 <body>
 <div class="topbar">
+  <button class="hamburger" id="menuToggle" title="Toggle endpoints" aria-label="Toggle endpoints">☰</button>
   <span class="logo">api2dart<span class="d">.</span></span>
   <span class="src">Source: <b id="sourceName">…</b></span>
   <div class="top-meta" id="topMeta"></div>
@@ -190,6 +245,7 @@ const String indexHtml = r'''<!DOCTYPE html>
 </div>
 
 <div class="main">
+  <div class="side-overlay" id="sideOverlay"></div>
   <aside class="side">
     <div class="side-tools">
       <input class="search" id="search" placeholder="Search endpoints…" autocomplete="off">
@@ -391,6 +447,7 @@ function renderEndpoint(ep){
     `<input type="checkbox" data-idx="${ep.index}" ${SELECTED.has(ep.index)?'checked':''}>`+
     `<span class="method m-${ep.method}">${ep.method}</span>`+
     `<span class="nm" title="${esc(ep.name)}">${esc(ep.path)}</span>`+
+    (GENERATED.has(ep.index)?`<span class="gen-tag" title="Generated">✓</span>`:``)+
     (ep.requiresAuth?`<span class="lock">🔒</span>`:``);
   row.querySelector('input').onclick=e=>{
     e.stopPropagation();
@@ -450,32 +507,79 @@ $('#selectAllBox').onclick=()=>{
 $('#search').oninput=renderTree;
 
 // ---- endpoint detail / request builder ----
+// Per-endpoint edit cache so switching endpoints doesn't lose unsaved edits.
+const EDITS={};
+// Snapshots the current builder form into EDITS[CUR].
+function captureEdits(){
+  if(CUR==null)return;
+  EDITS[CUR]={
+    method:$('#mMethod').value, url:$('#mUrl').value,
+    params:collectKv('#pane-params'), headers:collectKv('#pane-headers'),
+    body:currentBody(), authType:$('#authType').value, authToken:$('#authToken').value,
+  };
+}
+
 async function openEndpoint(idx){
+  captureEdits();  // preserve edits on the endpoint we're leaving
   CUR=idx;
   $$('.ep').forEach(e=>e.classList.toggle('active',+e.dataset.idx===idx));
   $('#blank').classList.add('hidden');
   $('#builder').classList.remove('hidden');
-  const d=await jget('/api/endpoint?index='+idx);
-  $('#epName').textContent=d.name;
-  $('#epDesc').textContent=d.description||'';
+  closeDrawer();  // on mobile, reveal the builder after picking
+
+  // Use cached edits if we have them; otherwise fetch fresh detail.
+  let d=EDITS[idx];
+  let isEdit=!!d;
+  if(!d){
+    // show a loading state while fetching detail
+    $('#epName').innerHTML=`${esc(EP_BY_INDEX[idx].name)} <span class="spinner"></span>`;
+    $('#epDesc').textContent='';
+    let r;
+    try{r=await jget('/api/endpoint?index='+idx);}
+    catch(e){$('#epName').textContent='Failed to load endpoint';return;}
+    if(CUR!==idx)return;  // user moved on while we were loading
+    d={method:r.method,url:r.url,params:r.queryParams,headers:r.headers,
+       body:{kind:r.body.kind||'none',raw:r.body.raw||'',fields:r.body.fields||[]},
+       authType:r.auth.type||'none',authToken:r.auth.token||'',
+       authHeaderName:(r.auth&&r.auth.headerName)||null,
+       name:r.name,description:r.description};
+    EP_BY_INDEX[idx]._detail=d;  // remember name/desc for header
+  }
+  AUTH_HEADER_NAME=d.authHeaderName||null;
+  const meta=EP_BY_INDEX[idx]._detail||d;
+  $('#epName').textContent=meta.name||EP_BY_INDEX[idx].name;
+  $('#epDesc').textContent=meta.description||'';
   $('#mMethod').value=d.method;
   $('#mUrl').value=d.url;
-  renderKv('#pane-params',d.queryParams,'bParams');
+  renderKv('#pane-params',d.params,'bParams');
   renderKv('#pane-headers',d.headers,'bHeaders');
   // body
-  const kind=d.body.kind||'none';
-  $('#bodyKind').value=kind;
-  $('#bodyRaw').value=d.body.raw||'';
-  renderBodyFields(d.body.fields||[]);
+  const bk=(d.body&&d.body.kind)||'none';
+  $('#bodyKind').value=bk;
+  $('#bodyRaw').value=(d.body&&d.body.raw)||'';
+  renderBodyFields((d.body&&d.body.fields)||[]);
   syncBodyUI();
   // auth
-  $('#authType').value=d.auth.type||'none';
-  $('#authToken').value=d.auth.token||'';
+  $('#authType').value=d.authType||'none';
+  $('#authToken').value=d.authToken||'';
   syncAuthUI();
   // reset code/preview lazily
   $('#codeBox').textContent='Select the Code tab to preview…';
   switchTab('params');
+  if(isEdit)markDirty();
 }
+// small "edited" indicator next to the endpoint name
+function markDirty(){
+  if(CUR!=null && !$('#dirtyTag')){
+    const t=document.createElement('span');t.id='dirtyTag';t.className='dirty-tag';t.textContent='edited';
+    $('#epName').appendChild(t);
+  }
+}
+// any edit in the builder marks the endpoint dirty
+['#mMethod','#mUrl','#bodyKind','#bodyRaw','#authType','#authToken'].forEach(s=>{
+  const el=$(s);if(el)el.addEventListener('input',markDirty);
+});
+$('.tabwrap').addEventListener('input',markDirty);
 
 function renderKv(sel,list,badgeId){
   const wrap=$(sel);
@@ -535,10 +639,15 @@ function switchTab(name){
 
 async function loadPreview(){
   if(CUR==null)return;
+  $('#codeFile').textContent='';
   $('#codeBox').textContent='Generating…';
-  const d=await jget('/api/preview?index='+CUR);
-  $('#codeFile').textContent=d.fileName;
-  $('#codeBox').textContent=d.code;
+  try{
+    const d=await jget('/api/preview?index='+CUR);
+    $('#codeFile').textContent=d.fileName||'';
+    $('#codeBox').textContent=d.code||'// (no code)';
+  }catch(e){
+    $('#codeBox').textContent='// Failed to load preview: '+String(e);
+  }
 }
 $('#copyCode').onclick=()=>navigator.clipboard.writeText($('#codeBox').textContent);
 
@@ -549,12 +658,13 @@ function currentBody(){
   if(k==='raw')return{kind:'raw',raw:$('#bodyRaw').value};
   return{kind:k,fields:collectKv('#bodyFields')};
 }
+let AUTH_HEADER_NAME=null;  // custom apiKey header name from the endpoint detail
 function applyAuthHeader(headers){
   const t=$('#authType').value, tok=$('#authToken').value.trim();
   if(t==='none'||!tok)return headers;
   if(t==='bearer')headers.push({key:'Authorization',value:'Bearer '+tok});
   else if(t==='basic')headers.push({key:'Authorization',value:'Basic '+tok});
-  else if(t==='apiKey')headers.push({key:'X-Api-Key',value:tok});
+  else if(t==='apiKey')headers.push({key:AUTH_HEADER_NAME||'X-Api-Key',value:tok});
   return headers;
 }
 $('#send').onclick=async()=>{
@@ -609,25 +719,46 @@ $('#generate').onclick=async()=>{
   }catch(e){showGenResults({error:String(e)});}
   finally{btn.disabled=false;btn.textContent='Generate selected';updateSel();}
 };
+const GENERATED=new Set();  // endpoint indexes already generated this session
 function showGenResults(d){
   const box=$('#genres');box.classList.remove('hidden');
-  if(d.error){box.innerHTML=`<h3>Error<button class="x">✕</button></h3><div class="gr-row"><span class="bad">✗ ${esc(d.error)}</span></div>`;}
-  else{
-    let h=`<h3>Generated ${d.generated.length}`+(d.skipped.length?`, skipped ${d.skipped.length}`:``)+`<button class="x">✕</button></h3>`;
+  if(d.error||!Array.isArray(d.generated)){
+    box.innerHTML=`<h3>Error<button class="x">✕</button></h3>`+
+      `<div class="gr-row"><span class="bad">✗ ${esc(d.error||'Unexpected response')}</span></div>`;
+  }else{
+    const skipped=d.skipped||[];
+    let h=`<h3>Generated ${d.generated.length}`+(skipped.length?`, skipped ${skipped.length}`:``)+`<button class="x">✕</button></h3>`;
     for(const g of d.generated)h+=`<div class="gr-row"><span class="ok">✓</span><span>${esc(g.file)}</span></div>`;
-    for(const s of d.skipped)h+=`<div class="gr-row"><span class="bad">✗</span><span>${esc(s.name)}</span><span class="gr-sub">${esc(s.reason)}</span></div>`;
+    for(const s of skipped)h+=`<div class="gr-row"><span class="bad">✗</span><span>${esc(s.name)}</span><span class="gr-sub">${esc(s.reason)}</span></div>`;
+    if(Array.isArray(d.logs)&&d.logs.length)h+=`<details class="gr-logs"><summary>${d.logs.length} log lines</summary><pre>${esc(d.logs.join('\n'))}</pre></details>`;
     box.innerHTML=h;
+    // mark the just-generated endpoints in the tree
+    [...SELECTED].forEach(i=>GENERATED.add(i));
+    $$('.ep').forEach(row=>{
+      const i=+row.dataset.idx;
+      if(GENERATED.has(i)&&!row.querySelector('.gen-tag')){
+        const t=document.createElement('span');t.className='gen-tag';t.textContent='✓';t.title='Generated';
+        row.appendChild(t);
+      }
+    });
   }
   box.querySelector('.x').onclick=()=>box.classList.add('hidden');
 }
 
 // keyboard: "/" focuses search, Ctrl/Cmd+Enter sends the current request
 document.addEventListener('keydown',e=>{
-  if(e.key==='/' && document.activeElement.tagName!=='INPUT' && document.activeElement.tagName!=='TEXTAREA'){
+  const tag=document.activeElement.tagName;
+  if(e.key==='/' && tag!=='INPUT' && tag!=='TEXTAREA' && tag!=='SELECT'){
     e.preventDefault();$('#search').focus();
   }
   if((e.metaKey||e.ctrlKey) && e.key==='Enter' && CUR!=null){e.preventDefault();$('#send').click();}
 });
+
+// ---- mobile sidebar drawer ----
+function openDrawer(){$('.side').classList.add('open');$('#sideOverlay').classList.add('open');}
+function closeDrawer(){$('.side').classList.remove('open');$('#sideOverlay').classList.remove('open');}
+$('#menuToggle').onclick=()=>$('.side').classList.contains('open')?closeDrawer():openDrawer();
+$('#sideOverlay').onclick=closeDrawer;
 
 load().catch(e=>{$('#tree').innerHTML=`<div class="empty">Failed to load: ${esc(String(e))}</div>`;});
 </script>
