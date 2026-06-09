@@ -158,6 +158,12 @@ const String indexHtml = r'''<!DOCTYPE html>
   .resp-body pre{padding:14px 18px;font-family:"SF Mono",Menlo,monospace;font-size:12.5px;
     line-height:1.6;color:#cbd5e1;white-space:pre-wrap;word-break:break-word}
   .resp-empty{color:var(--faint);padding:20px 18px;font-size:13px}
+  .resp-info{padding:10px 18px;border-bottom:1px solid var(--line);font-size:12px}
+  .resp-line{display:flex;gap:10px;padding:2px 0;font-family:monospace;word-break:break-all}
+  .resp-line b{color:var(--accent);font-weight:600;min-width:120px;flex:0 0 auto}
+  .resp-line span{color:var(--muted)}
+  .resp-headers summary{cursor:pointer;color:var(--muted);font-size:12px;padding:4px 0;user-select:none}
+  .resp-headers summary:hover{color:var(--ink)}
   .spinner{display:inline-block;width:13px;height:13px;border:2px solid var(--line);
     border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -358,12 +364,17 @@ function renderNode(node,depth,expand){
     if(el)kids.appendChild(el);
   }
   const fbox=head.querySelector('.folder-box');
-  // ◉ folder checkbox: selects/deselects every visible endpoint beneath it.
+  fbox.dataset.idxs=JSON.stringify(idxs);
+  // ◉ folder checkbox: selects/deselects every visible endpoint beneath it,
+  // updating the rows + ancestor folders IN PLACE (no full re-render, so
+  // expand/collapse state and scroll position are preserved).
   fbox.onclick=e=>{
     e.stopPropagation();
     const on=e.target.checked;
     idxs.forEach(i=>on?SELECTED.add(i):SELECTED.delete(i));
-    renderTree();updateSel();
+    // reflect on the descendant row checkboxes currently in the DOM
+    idxs.forEach(i=>{const cb=tree.querySelector(`.ep input[data-idx="${i}"]`);if(cb)cb.checked=on;});
+    refreshChecks();
   };
   syncFolderBox(fbox,idxs);
   head.onclick=()=>{head.classList.toggle('collapsed');kids.classList.toggle('hidden');};
@@ -384,10 +395,20 @@ function renderEndpoint(ep){
   row.querySelector('input').onclick=e=>{
     e.stopPropagation();
     toggleSel(ep.index,e.target.checked);
-    renderTree();  // refresh ancestor folder checkboxes
+    refreshChecks();  // update folder/master boxes in place — no re-render
   };
   row.onclick=()=>openEndpoint(ep.index);
   return row;
+}
+
+// Recomputes every folder checkbox and the master checkbox from SELECTED,
+// without rebuilding the tree DOM. Called after any in-tree selection change.
+function refreshChecks(){
+  for(const fbox of $$('.folder-box')){
+    let idxs=[];try{idxs=JSON.parse(fbox.dataset.idxs||'[]');}catch(_){}
+    syncFolderBox(fbox,idxs);
+  }
+  updateSel();  // updates count, generate button, and master checkbox
 }
 
 // Reflect a folder's selection state on its header checkbox:
@@ -415,14 +436,17 @@ function syncMaster(){
   box.indeterminate=sel>0 && sel<vis.length;
   $('#selectAllLabel').textContent=box.checked?'Deselect all':'Select all';
 }
-// master checkbox: toggles all currently-visible (filtered) endpoints
+// master checkbox: toggles all currently-visible (filtered) endpoints, in
+// place (preserves expand/collapse + scroll).
 $('#selectAllBox').onclick=()=>{
   const vis=filtered();
-  const allOn=vis.length>0 && vis.every(ep=>SELECTED.has(ep.index));
-  if(allOn)vis.forEach(ep=>SELECTED.delete(ep.index));
-  else vis.forEach(ep=>SELECTED.add(ep.index));
-  renderTree();updateSel();
+  const on=!(vis.length>0 && vis.every(ep=>SELECTED.has(ep.index)));
+  vis.forEach(ep=>on?SELECTED.add(ep.index):SELECTED.delete(ep.index));
+  // sync every visible row checkbox in the DOM
+  $$('.ep input').forEach(cb=>{cb.checked=SELECTED.has(+cb.dataset.idx);});
+  refreshChecks();
 };
+// Searching does need a re-render (the visible set changes structurally).
 $('#search').oninput=renderTree;
 
 // ---- endpoint detail / request builder ----
@@ -562,7 +586,16 @@ function renderResponse(res){
   $('#respMeta').textContent=`${res.timeMs} ms`;
   let body=res.body;
   try{body=JSON.stringify(JSON.parse(res.body),null,2);}catch(_){}
-  $('#respBody').innerHTML=`<pre>${esc(body)}</pre>`;
+  // show the actual URL hit + response headers (collapsible) above the body
+  let head='';
+  if(res.requestUrl)head+=`<div class="resp-line"><b>URL</b> <span>${esc(res.requestUrl)}</span></div>`;
+  const rh=res.responseHeaders||{};
+  const hk=Object.keys(rh);
+  if(hk.length){
+    head+=`<details class="resp-headers"><summary>${hk.length} response headers</summary>`+
+      hk.map(k=>`<div class="resp-line"><b>${esc(k)}</b> <span>${esc(rh[k])}</span></div>`).join('')+`</details>`;
+  }
+  $('#respBody').innerHTML=(head?`<div class="resp-info">${head}</div>`:'')+`<pre>${esc(body)}</pre>`;
 }
 $('#respClose').onclick=()=>$('#resp').classList.add('hidden');
 

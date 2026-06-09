@@ -14,6 +14,7 @@ export 'src/core/sources/postman_source.dart';
 export 'src/core/sources/openapi_source.dart';
 export 'src/core/sources/apidog_source.dart';
 export 'src/core/sources/local_file_source.dart';
+export 'src/core/sources/url_variable_resolver.dart';
 
 // API Fetchers
 export 'src/core/sources/api_fetchers/postman_fetcher.dart';

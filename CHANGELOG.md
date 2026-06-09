@@ -1,27 +1,38 @@
 ## 0.5.0
 
 ### Added
-- New `api2dart serve` command — launches a local, Apidog-like web UI to
-  browse, try, and generate from your API source in the browser. Parses the
-  source (same flags as `generate`), prints a `localhost` link, and (by
-  default) opens it automatically. The UI provides:
-  - **Sidebar** — endpoint tree grouped by folder, with live search, per-method
-    filters, and checkboxes for batch selection.
-  - **Request builder** — editable method/URL plus Params / Headers / Body /
-    Auth tabs, and a **Send** button that fires the real request and shows the
-    live response (status, time, formatted JSON). No files written.
-  - **Code preview** — the generated Dart for the selected endpoint, on demand.
-  - **Generate selected** — writes the exact same `*_action.dart` /
-    `*_response.dart` files and Markdown logs as `generate` (same core
-    pipeline).
-  - Keyboard: `/` focuses search, `Ctrl/Cmd+Enter` sends the request.
-  - `--no-open` to skip auto-launching the browser; `-p/--port` to pick a port.
-  - Binds to loopback only; works in non-TTY environments (no raw stdin).
-- The interactive wizard (`api2dart` with no args) now also prints an optional
-  web UI link after loading endpoints — for any source (Postman/Apidog/file).
-  The terminal selector still works exactly as before; the link is just an
-  extra way to browse/select/generate in the browser. The server keeps running
-  until you press Ctrl+C.
+- **Local web UI** — a browser-based, Apidog-like workspace to browse, try, and
+  generate from your endpoints. Two ways in:
+  - The interactive wizard (`api2dart` with no args) prints an **optional web
+    link** after loading endpoints — for any source (Postman/Apidog/file). The
+    terminal selector still works exactly as before; the link is an extra way
+    to work in the browser. The server runs until `Ctrl+C`.
+  - `api2dart serve -s <source> -c <file>` opens the web UI directly for a
+    **local file** (and auto-opens the browser; `--no-open` to skip,
+    `-p/--port` to choose a port). For live Apidog/Postman fetch, use the
+    wizard.
+  - The UI mirrors the terminal selector's nested folder tree (collapsed by
+    default), with live search, per-method filters, and folder/master
+    checkboxes — selection state and scroll are preserved while you pick.
+  - **Request builder** — editable method/URL + Params/Headers/Body/Auth tabs
+    and a **Send** button that fires the real request and shows status, time,
+    response headers, and formatted JSON. The session token is applied
+    automatically (Bearer) for authenticated endpoints.
+  - **Code preview** of the generated Dart per endpoint.
+  - **Generate selected** writes the exact same `*_action.dart` /
+    `*_response.dart` files and Markdown logs as the terminal `generate`,
+    including correct Apidog URL-variable path/base-URL resolution (see Fixed).
+  - Keyboard: `/` focuses search, `Ctrl/Cmd+Enter` sends. Loopback-only; works
+    in non-TTY environments.
+
+### Fixed
+- Apidog endpoints whose paths use a URL-variable prefix (e.g.
+  `/system_user_url/login`) are now resolved consistently across the terminal
+  and web flows: the prefix is stripped, the correct per-endpoint base URL is
+  applied, and the name is rebuilt from the clean path. Previously this
+  resolution happened only in the terminal generate path, so the web UI showed
+  and generated wrong URLs/paths for such Apidog projects. The logic now lives
+  in a shared `UrlVariableResolver` used by both.
 
 ## 0.4.0
 

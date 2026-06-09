@@ -7,6 +7,7 @@ import '../generation/code_emitter.dart';
 import '../logger/logger.dart';
 import '../models/api_endpoint.dart';
 import '../models/api_folder.dart';
+import '../models/auth_definition.dart';
 import '../models/body_definition.dart';
 import '../models/endpoint_tree.dart';
 import '../models/response_definition.dart';
@@ -236,23 +237,42 @@ class ApiWebServer {
       return;
     }
 
-    final url = (payload['url'] as String?)?.trim() ?? '';
-    if (url.isEmpty) {
+    final rawUrl = (payload['url'] as String?)?.trim() ?? '';
+    if (rawUrl.isEmpty) {
       _json(req, 400, {'error': 'A URL is required to send the request.'});
       return;
     }
     final method = _parseMethod(payload['method'] as String? ?? 'GET');
     final headers = _kvToMap(payload['headers']);
-    final query = _kvToMap(payload['queryParams']);
+    final panelQuery = _kvToMap(payload['queryParams']);
     final bodyDef = _bodyFromPayload(payload['body']);
+
+    // Merge query params already in the URL with those from the params panel
+    // (panel wins on conflicts), so neither source is silently dropped — the
+    // HttpClient's .replace(queryParameters:) would otherwise overwrite one.
+    final parsed = Uri.parse(rawUrl);
+    final mergedQuery = <String, String>{
+      ...parsed.queryParameters,
+      ...panelQuery,
+    };
+    final url = parsed.replace(query: '').toString();
+
+    // Apply the session token the same way the generate path does (Bearer by
+    // default) unless the user already set an Authorization header.
+    final hasAuthHeader =
+        headers.keys.any((k) => k.toLowerCase() == 'authorization');
+    final auth = (!hasAuthHeader && token != null && token!.isNotEmpty)
+        ? AuthDefinition(type: AuthType.bearer, token: token)
+        : null;
 
     final httpClient = ApiHttpClient(logger: logger);
     final result = await httpClient.request(
       url: url,
       method: method,
       headers: headers.isNotEmpty ? headers : null,
-      queryParams: query.isNotEmpty ? query : null,
+      queryParams: mergedQuery.isNotEmpty ? mergedQuery : null,
       body: bodyDef,
+      auth: auth,
     );
 
     if (result == null) {
@@ -321,10 +341,12 @@ class ApiWebServer {
     };
   }
 
-  /// Best-effort full URL for an endpoint: `baseUrl + path`, normalizing the
-  /// slash at the join. Falls back to the raw path when no base URL was given.
+  /// Best-effort full URL for an endpoint: `base + path`, normalizing the slash
+  /// at the join. Uses the endpoint's per-endpoint [ApiEndpoint.baseUrlOverride]
+  /// (set by Apidog URL-variable resolution) when present, else the default
+  /// base URL. Falls back to the raw path when neither is available.
   String _fullUrl(ApiEndpoint ep) {
-    final b = baseUrl ?? '';
+    final b = ep.baseUrlOverride ?? baseUrl ?? '';
     if (b.isEmpty) return ep.path;
     final base = b.endsWith('/') ? b.substring(0, b.length - 1) : b;
     final path = ep.path.startsWith('/') ? ep.path : '/${ep.path}';
@@ -404,13 +426,15 @@ class ApiWebServer {
     final resolver = ResponseResolver(httpClient: httpClient);
     final emitter = CodeEmitter(logger: buffer);
 
-    final resolvedBaseUrl = baseUrl ?? '';
+    final defaultBaseUrl = baseUrl ?? '';
     final endpointResponses = <ApiEndpoint, ResponseDefinition?>{};
     final generated = <Map<String, dynamic>>[];
     final skipped = <Map<String, dynamic>>[];
 
     for (final i in indexes) {
       final endpoint = _ordered[i];
+      // Per-endpoint base URL (Apidog URL-variable override) when present.
+      final resolvedBaseUrl = endpoint.baseUrlOverride ?? defaultBaseUrl;
       buffer.i('Processing ${endpoint.method.name} ${endpoint.path}...');
 
       ResolveResult result;

@@ -95,6 +95,22 @@ class ServeCommand extends Command {
     final modeArg = argResults!['mode'] as String;
     final portArg = argResults!['port'] as String;
 
+    // Apidog/Postman need live API access (token, project, environment) that
+    // only the wizard provides — `serve` only parses a local file. Point the
+    // user at `generate`, whose wizard also prints the same web UI link.
+    if (sourceType == 'apidog' || sourceType == 'postman') {
+      if (configPath == null) {
+        logger.e(
+            '`serve -s $sourceType` needs a local file via -c (an exported '
+            'spec/collection).\n'
+            'To pull directly from $sourceType (token/project/environment) and '
+            'still get the web UI, run `api2dart generate` — its wizard prints '
+            'the same web link.');
+        exitCode = 64; // EX_USAGE
+        return;
+      }
+    }
+
     if (sourceType == null || configPath == null) {
       logger.e('Both --source and --config are required.\n'
           'Usage: $invocation');

@@ -44,7 +44,28 @@ This launches the wizard:
 
 1. **Select source** — Local file, Postman API, or Apidog API
 2. **Select endpoints** — Interactive tree with keyboard navigation
-3. **Generate** — Files are written to `lib/actions/` (or `lib/models/` in response-only mode)
+3. **Generate** — Files are written under `api2dart/<date>/actions/` (and request logs under `.../logs/`)
+
+After loading endpoints, the wizard also prints an **optional web UI link**
+(e.g. `http://127.0.0.1:4321`). Open it to browse, search/filter, **try
+requests live**, preview the generated Dart, and select/generate from the
+browser — a richer alternative to the terminal selector. The terminal flow
+keeps working as before; the link is just an extra option. The web server runs
+until you press `Ctrl+C`.
+
+### Web UI for a local file (`serve`)
+
+If you already have a Postman/OpenAPI/YAML file on disk, you can open the web UI
+directly without the wizard:
+
+```bash
+dart run api_to_dart serve -s openapi -c openapi.yaml -b https://api.example.com
+# prints a localhost link and (by default) opens your browser; --no-open to skip
+```
+
+`serve` parses a **local file** only. To pull live from Apidog/Postman
+(token/project/environment) and still get the web UI, use `generate` — its
+wizard prints the same link.
 
 ### With Postman
 

@@ -18,6 +18,7 @@ import '../../core/sources/api_fetchers/config_storage.dart';
 import '../../core/sources/api_fetchers/postman_fetcher.dart';
 import '../../core/sources/openapi_source.dart';
 import '../../core/sources/postman_source.dart';
+import '../../core/sources/url_variable_resolver.dart';
 import '../ui/endpoint_selector.dart';
 import '../ui/file_browser.dart';
 import '../ui/prompts.dart';
@@ -51,7 +52,11 @@ class GenerateWizard {
       if (loadResult == null) return;
     }
 
-    final tree = loadResult.tree;
+    // Resolve Apidog URL-variable path prefixes ONCE, up front, so the tree
+    // shown in the terminal, served to the web UI, and used for generation are
+    // all identical (clean paths + per-endpoint base URL overrides).
+    final tree = UrlVariableResolver(loadResult.urlVariables)
+        .resolveTree(loadResult.tree);
     var baseUrl = loadResult.baseUrl;
     var token = loadResult.token;
 
@@ -122,7 +127,6 @@ class GenerateWizard {
         endpoints: selected,
         baseUrl: baseUrl ?? '',
         token: token,
-        urlVariables: loadResult.urlVariables,
       );
 
       // Deselect generated endpoints but keep tree state
@@ -697,50 +701,6 @@ class GenerateWizard {
 
   // ── Step 3: Generate ───────────────────────────────────────────────
 
-  /// Builds a PascalCase name from a clean path.
-  String _nameFromCleanPath(String path, String method) {
-    final segments = path
-        .split('/')
-        .where((s) =>
-            s.isNotEmpty &&
-            !RegExp(r'^\d+$').hasMatch(s) &&
-            !RegExp(r'^\{.*\}$').hasMatch(s))
-        .toList();
-
-    if (segments.isEmpty) return method;
-
-    final nameParts =
-        segments.length <= 3 ? segments : segments.sublist(segments.length - 3);
-
-    final pathName = nameParts
-        .join('-')
-        .replaceAll(RegExp(r'[^a-zA-Z0-9]'), ' ')
-        .split(RegExp(r'\s+'))
-        .where((s) => s.isNotEmpty)
-        .map((s) => s[0].toUpperCase() + s.substring(1))
-        .join();
-
-    return pathName;
-  }
-
-  /// Resolves the actual base URL for an endpoint.
-  /// Some endpoints use URL variables as path prefixes
-  /// (e.g. path "/system_user_url/login" where system_user_url is a variable
-  /// pointing to "https://host/api/v1/system-user").
-  String _resolveBaseUrl(ApiEndpoint endpoint, String defaultBaseUrl,
-      Map<String, String> urlVars) {
-    if (urlVars.isEmpty) return defaultBaseUrl;
-
-    final path = endpoint.path;
-    // Check if the first path segment matches a URL variable name
-    final segments = path.split('/').where((s) => s.isNotEmpty).toList();
-    if (segments.isNotEmpty && urlVars.containsKey(segments[0])) {
-      return urlVars[segments[0]]!;
-    }
-
-    return defaultBaseUrl;
-  }
-
   /// Date folder name (YYYY-MM-DD) used to group each run's output.
   String _todayFolder() {
     final now = DateTime.now();
@@ -748,26 +708,10 @@ class GenerateWizard {
     return '${now.year}-${two(now.month)}-${two(now.day)}';
   }
 
-  /// Gets the clean path for an endpoint, removing URL variable prefixes.
-  String _resolveEndpointPath(
-      ApiEndpoint endpoint, Map<String, String> urlVars) {
-    if (urlVars.isEmpty) return endpoint.path;
-
-    final segments =
-        endpoint.path.split('/').where((s) => s.isNotEmpty).toList();
-    if (segments.isNotEmpty && urlVars.containsKey(segments[0])) {
-      // Remove the URL variable prefix from the path
-      return '/${segments.sublist(1).join('/')}';
-    }
-
-    return endpoint.path;
-  }
-
   Future<void> _step3Generate({
     required List<ApiEndpoint> endpoints,
     required String baseUrl,
     String? token,
-    Map<String, String> urlVariables = const {},
   }) async {
     final generateAction = PubspecInspector.hasApiRequestDependency();
     final rootOutputDir = 'api2dart';
@@ -788,28 +732,10 @@ class GenerateWizard {
 
     final endpointResponses = <ApiEndpoint, ResponseDefinition?>{};
 
-    for (final endpoint in endpoints) {
-      // Resolve the correct base URL and clean path for this endpoint
-      final resolvedBaseUrl = _resolveBaseUrl(endpoint, baseUrl, urlVariables);
-      final cleanPath = _resolveEndpointPath(endpoint, urlVariables);
-
-      // Rebuild name from clean path if the path changed
-      final name = cleanPath != endpoint.path
-          ? _nameFromCleanPath(cleanPath, endpoint.method.name)
-          : endpoint.name;
-
-      // Create endpoint with clean path for code generation
-      final cleanEndpoint = ApiEndpoint(
-        name: name,
-        path: cleanPath,
-        method: endpoint.method,
-        description: endpoint.description,
-        body: endpoint.body,
-        headers: endpoint.headers,
-        queryParams: endpoint.queryParams,
-        auth: endpoint.auth,
-        response: endpoint.response,
-      );
+    for (final cleanEndpoint in endpoints) {
+      // Endpoints are already URL-variable-resolved (clean path + name) up
+      // front; use the per-endpoint base override when present.
+      final resolvedBaseUrl = cleanEndpoint.baseUrlOverride ?? baseUrl;
 
       ResolveResult result;
       try {

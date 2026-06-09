@@ -15,6 +15,11 @@ class ApiEndpoint {
   final AuthDefinition auth;
   final ResponseDefinition? response;
 
+  /// Per-endpoint base URL override. Set when the endpoint's path used a URL
+  /// variable prefix (Apidog) that resolves to a different host than the
+  /// default base URL. When null, the caller's default base URL applies.
+  final String? baseUrlOverride;
+
   const ApiEndpoint({
     required this.name,
     required this.path,
@@ -25,6 +30,7 @@ class ApiEndpoint {
     this.queryParams = const {},
     this.auth = const AuthDefinition(type: AuthType.none),
     this.response,
+    this.baseUrlOverride,
   });
 
   /// PascalCase name stripped of non-alphanumeric chars, prefixed with the
@@ -37,8 +43,8 @@ class ApiEndpoint {
     // PascalCase the method (GET -> Get) and prepend it so endpoints sharing a
     // path differ by method. Skip when the name already starts with the method
     // (e.g. "GetUsers" + GET) to avoid "GetGetUsers".
-    final methodPart = method.name[0].toUpperCase() +
-        method.name.substring(1).toLowerCase();
+    final methodPart =
+        method.name[0].toUpperCase() + method.name.substring(1).toLowerCase();
     if (base.toLowerCase().startsWith(method.name.toLowerCase())) {
       return base;
     }
