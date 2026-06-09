@@ -179,6 +179,35 @@ void main() {
       expect(jsonDecode(body)['error'], contains('URL is required'));
     });
   });
+
+  _isolateGroup();
+}
+
+void _isolateGroup() {
+  group('spawnWebServerIsolate', () {
+    test('serves /api/tree from a separate isolate', () async {
+      final tree = EndpointTree(
+        sourceName: 'Iso API',
+        rootEndpoints: [_ep('Ping', '/ping', HttpMethod.GET)],
+      );
+      // Port 0 → OS-assigned free port, returned in the URL.
+      final url = await spawnWebServerIsolate(
+        tree: tree,
+        outputDir: 'out/actions',
+        logsDir: 'out/logs',
+        baseUrl: null,
+        token: null,
+        generateAction: true,
+        port: 0,
+      );
+      expect(url, isNotNull);
+      expect(url, startsWith('http://127.0.0.1:'));
+
+      final res = await _getJson('$url/api/tree');
+      expect(res['sourceName'], 'Iso API');
+      expect((res['endpoints'] as List).length, 1);
+    });
+  });
 }
 
 Future<Map<String, dynamic>> _getJson(String url) async {

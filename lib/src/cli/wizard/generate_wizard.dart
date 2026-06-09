@@ -159,16 +159,20 @@ class GenerateWizard {
       final outputDir = 'api2dart/$dateFolder/actions';
       final logsDir = 'api2dart/$dateFolder/logs';
 
-      final server = ApiWebServer(
+      // Run the server in its own isolate. The terminal selector below blocks
+      // the main isolate on synchronous key reads, so an in-process server
+      // would never get a chance to answer the browser. A separate isolate
+      // keeps the web UI responsive.
+      final url = await spawnWebServerIsolate(
         tree: tree,
         outputDir: outputDir,
         logsDir: logsDir,
         baseUrl: baseUrl,
         token: token,
         generateAction: generateAction,
-        logger: _logger,
+        port: 4321,
       );
-      final url = await server.start(4321);
+      if (url == null) return false;
 
       stdout.writeln(
           TerminalUtils.gray('  ◦ Prefer a browser? Open the web UI: ') +

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import '../generation/code_emitter.dart';
 import '../logger/logger.dart';
@@ -265,8 +266,7 @@ class ApiWebServer {
     _json(req, 200, {
       'ok': true,
       'status': result.statusCode,
-      'timeMs':
-          result.receivedTime.difference(result.sentTime).inMilliseconds,
+      'timeMs': result.receivedTime.difference(result.sentTime).inMilliseconds,
       'requestUrl': result.requestUrl,
       'responseHeaders': result.headers,
       'body': result.body,
@@ -493,5 +493,101 @@ class _BufferingLogger implements Logger {
   void n(String message) {
     messages.add(message);
     _inner.n(message);
+  }
+}
+
+/// A no-op logger used inside the server isolate so it never writes to the
+/// terminal (which the interactive selector owns in the main isolate).
+class _SilentLogger implements Logger {
+  @override
+  void d(String message) {}
+  @override
+  void i(String message) {}
+  @override
+  void w(String message) {}
+  @override
+  void e(String message, {Object? error}) {}
+  @override
+  void n(String message) {}
+}
+
+/// Everything the server isolate needs to construct an [ApiWebServer]. All
+/// fields are plain immutable data, so this passes cleanly across the isolate
+/// boundary.
+class WebServerConfig {
+  final EndpointTree tree;
+  final String outputDir;
+  final String logsDir;
+  final String? baseUrl;
+  final String? token;
+  final bool generateAction;
+  final int port;
+  final SendPort replyPort;
+
+  const WebServerConfig({
+    required this.tree,
+    required this.outputDir,
+    required this.logsDir,
+    required this.baseUrl,
+    required this.token,
+    required this.generateAction,
+    required this.port,
+    required this.replyPort,
+  });
+}
+
+/// Spawns the web server in a dedicated isolate and returns its URL.
+///
+/// This is what lets the web UI stay responsive while the main isolate is
+/// blocked on the terminal selector's synchronous `readKey()` — the server's
+/// own event loop runs independently. The browser can hit it any time.
+///
+/// Returns null if the server failed to start (e.g. the port is busy).
+Future<String?> spawnWebServerIsolate({
+  required EndpointTree tree,
+  required String outputDir,
+  required String logsDir,
+  required String? baseUrl,
+  required String? token,
+  required bool generateAction,
+  required int port,
+}) async {
+  final reply = ReceivePort();
+  await Isolate.spawn(
+    _webServerIsolateEntry,
+    WebServerConfig(
+      tree: tree,
+      outputDir: outputDir,
+      logsDir: logsDir,
+      baseUrl: baseUrl,
+      token: token,
+      generateAction: generateAction,
+      port: port,
+      replyPort: reply.sendPort,
+    ),
+  );
+  // The isolate sends back the URL string on success, or null on failure.
+  final result = await reply.first;
+  reply.close();
+  return result as String?;
+}
+
+/// Isolate entrypoint: starts the server and reports its URL (or null) back.
+Future<void> _webServerIsolateEntry(WebServerConfig config) async {
+  try {
+    final server = ApiWebServer(
+      tree: config.tree,
+      outputDir: config.outputDir,
+      logsDir: config.logsDir,
+      baseUrl: config.baseUrl,
+      token: config.token,
+      generateAction: config.generateAction,
+      logger: _SilentLogger(),
+    );
+    final url = await server.start(config.port);
+    config.replyPort.send(url);
+    // Keep the isolate alive so the server keeps serving.
+  } catch (_) {
+    config.replyPort.send(null);
   }
 }
